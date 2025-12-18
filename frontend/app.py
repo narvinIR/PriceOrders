@@ -92,8 +92,8 @@ elif page == "📋 Каталог":
 
     with tab2:
         st.subheader("💰 Таблица цен со скидками")
-        DISCOUNTS = [50, 53, 55, 56, 57, 58, 59, 60]
-        selected_discount = st.selectbox("Скидка клиента", DISCOUNTS, index=1)
+        DISCOUNTS = list(range(50, 61))  # 50-60% с шагом 1%
+        selected_discount = st.selectbox("Скидка клиента", DISCOUNTS, index=3)  # 53% по умолчанию
 
         products = api_get(f"/products/with-prices/?discount={selected_discount}")
         if products:

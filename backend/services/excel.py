@@ -176,14 +176,14 @@ class ExcelService:
                     if not name or name == 'nan':
                         continue
 
-                    # Цена (в прайсе указана со скидкой 53%)
+                    # Цена (в прайсе указана базовая 0%)
                     price = None
                     base_price = None
                     if price_col is not None and pd.notna(row.iloc[price_col]):
                         try:
                             price = float(row.iloc[price_col])
-                            # base_price = price / (1 - 0.53) = price / 0.47
-                            base_price = round(price / 0.47, 2)
+                            # base_price = price напрямую (0% скидка)
+                            base_price = round(price, 2)
                         except (ValueError, TypeError):
                             pass
 

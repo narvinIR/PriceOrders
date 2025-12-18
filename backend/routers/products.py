@@ -97,8 +97,8 @@ async def search_products(query: str, limit: int = 10):
         .execute()
     return response.data or []
 
-# Уровни скидок
-DISCOUNT_LEVELS = [50, 53, 55, 56, 57, 58, 59, 60]
+# Уровни скидок (50-60% с шагом 1%)
+DISCOUNT_LEVELS = list(range(50, 61))
 
 def calculate_prices(base_price: float) -> dict:
     """Расчёт цен для всех уровней скидок"""
