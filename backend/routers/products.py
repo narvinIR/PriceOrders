@@ -66,14 +66,24 @@ async def upload_catalog(file: UploadFile = File(...)):
 
     content = await file.read()
     from io import BytesIO
-    products = ExcelService.parse_catalog(BytesIO(content), file.filename)
+    file_buffer = BytesIO(content)
+
+    # Определяем формат файла
+    if file.filename.endswith('.xlsx') and ExcelService.is_jakko_format(file_buffer):
+        file_buffer.seek(0)
+        products = ExcelService.parse_jakko_catalog(file_buffer)
+        format_type = "jakko"
+    else:
+        file_buffer.seek(0)
+        products = ExcelService.parse_catalog(file_buffer, file.filename)
+        format_type = "standard"
 
     db = get_supabase_client()
     # Bulk upsert
     if products:
         db.table('products').upsert(products, on_conflict='sku').execute()
 
-    return {"uploaded": len(products)}
+    return {"uploaded": len(products), "format": format_type}
 
 @router.get("/search/{query}")
 async def search_products(query: str, limit: int = 10):
