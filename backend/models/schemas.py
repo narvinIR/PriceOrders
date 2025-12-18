@@ -11,6 +11,7 @@ class ProductBase(BaseModel):
     brand: Optional[str] = None
     unit: str = "шт"
     price: Optional[float] = None
+    base_price: Optional[float] = None
     attributes: dict = Field(default_factory=dict)
 
 class ProductCreate(ProductBase):
@@ -22,6 +23,7 @@ class ProductUpdate(BaseModel):
     brand: Optional[str] = None
     unit: Optional[str] = None
     price: Optional[float] = None
+    base_price: Optional[float] = None
     attributes: Optional[dict] = None
 
 class Product(ProductBase):

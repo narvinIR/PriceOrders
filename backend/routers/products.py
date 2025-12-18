@@ -96,3 +96,54 @@ async def search_products(query: str, limit: int = 10):
         .limit(limit)\
         .execute()
     return response.data or []
+
+# Уровни скидок
+DISCOUNT_LEVELS = [50, 53, 55, 56, 57, 58, 59, 60]
+
+def calculate_prices(base_price: float) -> dict:
+    """Расчёт цен для всех уровней скидок"""
+    if not base_price:
+        return {}
+    return {
+        "base": round(base_price, 2),
+        **{f"d{d}": round(base_price * (1 - d/100), 2) for d in DISCOUNT_LEVELS}
+    }
+
+@router.get("/{product_id}/prices")
+async def get_product_prices(product_id: UUID):
+    """Получить цены товара со всеми скидками"""
+    db = get_supabase_client()
+    response = db.table('products')\
+        .select('sku, name, base_price')\
+        .eq('id', str(product_id))\
+        .single()\
+        .execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+
+    product = response.data
+    return {
+        "sku": product['sku'],
+        "name": product['name'],
+        "prices": calculate_prices(product.get('base_price'))
+    }
+
+@router.get("/with-prices/")
+async def list_products_with_prices(skip: int = 0, limit: int = 100, discount: int = 53):
+    """Список товаров с ценой по указанной скидке"""
+    if discount not in DISCOUNT_LEVELS:
+        raise HTTPException(status_code=400, detail=f"Допустимые скидки: {DISCOUNT_LEVELS}")
+
+    db = get_supabase_client()
+    response = db.table('products')\
+        .select('*')\
+        .range(skip, skip + limit - 1)\
+        .execute()
+
+    products = response.data or []
+    for p in products:
+        base = p.get('base_price')
+        if base:
+            p['discount_price'] = round(base * (1 - discount/100), 2)
+            p['discount_percent'] = discount
+    return products

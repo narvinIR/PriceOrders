@@ -73,7 +73,7 @@ if page == "🏠 Главная":
 elif page == "📋 Каталог":
     st.title("📋 Каталог товаров")
 
-    tab1, tab2 = st.tabs(["Просмотр", "Загрузка"])
+    tab1, tab2, tab3 = st.tabs(["Просмотр", "Цены со скидками", "Загрузка"])
 
     with tab1:
         products = api_get("/products/")
@@ -81,7 +81,7 @@ elif page == "📋 Каталог":
             df = pd.DataFrame(products)
             if not df.empty:
                 st.dataframe(
-                    df[['sku', 'name', 'category', 'brand', 'unit', 'price']],
+                    df[['sku', 'name', 'category', 'brand', 'unit', 'price', 'base_price']],
                     use_container_width=True,
                     hide_index=True
                 )
@@ -91,6 +91,49 @@ elif page == "📋 Каталог":
             st.info("Каталог пуст")
 
     with tab2:
+        st.subheader("💰 Таблица цен со скидками")
+        DISCOUNTS = [50, 53, 55, 56, 57, 58, 59, 60]
+        selected_discount = st.selectbox("Скидка клиента", DISCOUNTS, index=1)
+
+        products = api_get(f"/products/with-prices/?discount={selected_discount}")
+        if products:
+            df = pd.DataFrame(products)
+            if not df.empty and 'base_price' in df.columns:
+                # Рассчитываем все скидки
+                for d in DISCOUNTS:
+                    df[f'{d}%'] = df['base_price'].apply(
+                        lambda x: round(float(x) * (1 - d/100), 2) if x else None
+                    )
+
+                # Показываем таблицу
+                cols = ['sku', 'name', 'category', 'base_price'] + [f'{d}%' for d in DISCOUNTS]
+                st.dataframe(
+                    df[cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "base_price": st.column_config.NumberColumn("База", format="%.2f"),
+                        **{f'{d}%': st.column_config.NumberColumn(f'{d}%', format="%.2f") for d in DISCOUNTS}
+                    }
+                )
+
+                # Экспорт в Excel
+                if st.button("📥 Экспорт в Excel"):
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df[cols].to_excel(writer, index=False, sheet_name='Цены')
+                    st.download_button(
+                        "⬇️ Скачать Excel",
+                        data=output.getvalue(),
+                        file_name="prices_with_discounts.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+            else:
+                st.info("Нет товаров с ценами")
+        else:
+            st.info("Загрузите каталог с ценами")
+
+    with tab3:
         st.subheader("Загрузка каталога из Excel")
         uploaded_file = st.file_uploader(
             "Выберите файл Excel/CSV с каталогом",
