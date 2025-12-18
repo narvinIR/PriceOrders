@@ -254,10 +254,17 @@ elif page == "📦 Заказы":
                     items_df = []
                     for item in items:
                         product = item.get('products') or item.get('product') or {}
+                        orig_qty = item.get('original_quantity')
+                        qty = item['quantity']
+                        pack_qty = product.get('pack_qty', 1)
+                        qty_display = f"{int(qty)}"
+                        if orig_qty and orig_qty != qty:
+                            qty_display = f"{int(qty)} (было {int(orig_qty)})"
                         items_df.append({
                             'Арт. клиента': item['client_sku'],
                             'Название клиента': item.get('client_name', ''),
-                            'Кол-во': item['quantity'],
+                            'Кол-во': qty_display,
+                            'Упак.': pack_qty if pack_qty > 1 else '',
                             'Арт. поставщика': product.get('sku', ''),
                             'Название поставщика': product.get('name', ''),
                             'Совпадение %': item.get('mapping_confidence', 0),

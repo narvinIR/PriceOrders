@@ -3,10 +3,18 @@ from fastapi.responses import StreamingResponse
 from uuid import UUID
 from io import BytesIO
 from datetime import datetime
+import math
 from backend.models.database import get_supabase_client
 from backend.models.schemas import Order, OrderCreate
 from backend.services.excel import ExcelService
 from backend.services.matching import MatchingService
+
+
+def round_to_pack(qty: float, pack_qty: int) -> int:
+    """Округление количества до целых упаковок"""
+    if pack_qty <= 1:
+        return int(math.ceil(qty))
+    return math.ceil(qty / pack_qty) * pack_qty
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -78,17 +86,31 @@ async def upload_order(
     items_data = [item.model_dump() for item in items]
     matched_items = matcher.match_order_items(client_id, items_data)
 
-    # Сохраняем позиции
+    # Получаем pack_qty для всех товаров
+    product_ids = [item['match'].get('product_id') for item in matched_items if item['match'].get('product_id')]
+    pack_qty_map = {}
+    if product_ids:
+        products_resp = db.table('products').select('id, pack_qty').in_('id', product_ids).execute()
+        for p in (products_resp.data or []):
+            pack_qty_map[p['id']] = p.get('pack_qty', 1) or 1
+
+    # Сохраняем позиции с округлением
     order_items = []
     needs_review_count = 0
     for item in matched_items:
         match = item['match']
+        original_qty = item['quantity']
+        product_id = match.get('product_id')
+        pack_qty = pack_qty_map.get(product_id, 1) if product_id else 1
+        rounded_qty = round_to_pack(original_qty, pack_qty)
+
         order_item = {
             'order_id': order_id,
             'client_sku': item['client_sku'],
             'client_name': item.get('client_name'),
-            'quantity': item['quantity'],
-            'mapped_product_id': match.get('product_id'),
+            'quantity': rounded_qty,
+            'original_quantity': original_qty if rounded_qty != original_qty else None,
+            'mapped_product_id': product_id,
             'mapping_confidence': match.get('confidence'),
             'mapping_type': match.get('match_type'),
             'needs_review': match.get('needs_review', True),
@@ -142,9 +164,11 @@ async def export_order(order_id: UUID):
             'client_sku': item['client_sku'],
             'client_name': item.get('client_name', ''),
             'quantity': item['quantity'],
+            'original_quantity': item.get('original_quantity'),
             'match': {
                 'product_sku': product['sku'] if product else '',
                 'product_name': product['name'] if product else '',
+                'pack_qty': product.get('pack_qty', 1) if product else 1,
                 'confidence': item.get('mapping_confidence', 0),
                 'match_type': item.get('mapping_type', ''),
                 'needs_review': item.get('needs_review', True)

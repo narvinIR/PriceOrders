@@ -1,8 +1,39 @@
 import pandas as pd
+import re
 from io import BytesIO
 from uuid import UUID
 from typing import BinaryIO
 from backend.models.schemas import OrderItemBase
+
+
+def extract_pack_qty(name: str) -> int:
+    """Извлечь количество в упаковке из названия товара"""
+    if not name:
+        return 1
+    patterns = [
+        r'\(уп\.?\s*(\d+)\s*шт\.?\)',  # (уп 20 шт), (уп.20шт)
+        r'\((\d+)\s*шт\)',              # (20 шт)
+        r'(\d+)\s*шт/кор',              # 100 шт/кор
+        r'уп\.?\s*(\d+)\s*шт',          # уп 20 шт
+        r'\((\d+)\s*шт/кор\)',          # (25 шт/кор)
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, name, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return 1
+
+
+def extract_thread_type(name: str) -> str | None:
+    """Извлечь тип резьбы из названия товара"""
+    if not name:
+        return None
+    name_lower = name.lower()
+    if 'вн.рез' in name_lower or 'вн рез' in name_lower or 'внутр' in name_lower:
+        return 'внутренняя'
+    if 'нар.рез' in name_lower or 'нар рез' in name_lower or 'наруж' in name_lower:
+        return 'наружная'
+    return None
 
 class ExcelService:
     """Парсинг Excel файлов с заказами"""
@@ -104,6 +135,7 @@ class ExcelService:
                 'brand': str(row[brand_col]).strip() if brand_col and pd.notna(row[brand_col]) else None,
                 'unit': str(row[unit_col]).strip() if unit_col and pd.notna(row[unit_col]) else 'шт',
                 'price': float(row[price_col]) if price_col and pd.notna(row[price_col]) else None,
+                'pack_qty': extract_pack_qty(name),
                 'attributes': {}
             }
             products.append(product)
@@ -143,20 +175,29 @@ class ExcelService:
                 if len(df) < 5:
                     continue
 
-                # Ищем колонки АРТИКУЛ и НОМЕНКЛАТУРА
+                # Ищем колонки по заголовкам
                 header_row = df.iloc[4]
                 sku_col = None
                 name_col = None
                 price_col = None
+                pack_col = None  # ПАКЕТ или УПАКОВКА
+                box_col = None   # КОРОБКА
+                thickness_col = None  # ТОЛЩИНА
 
                 for idx, val in enumerate(header_row):
-                    val_str = str(val).upper()
+                    val_str = str(val).upper().strip()
                     if 'АРТИКУЛ' in val_str:
                         sku_col = idx
                     elif 'НОМЕНКЛАТУРА' in val_str:
                         name_col = idx
                     elif 'ЦЕНА' in val_str and price_col is None:
                         price_col = idx
+                    elif val_str in ('ПАКЕТ', 'УПАКОВКА'):
+                        pack_col = idx
+                    elif val_str == 'КОРОБКА':
+                        box_col = idx
+                    elif val_str == 'ТОЛЩИНА':
+                        thickness_col = idx
 
                 if sku_col is None or name_col is None:
                     continue
@@ -182,10 +223,50 @@ class ExcelService:
                     if price_col is not None and pd.notna(row.iloc[price_col]):
                         try:
                             price = float(row.iloc[price_col])
-                            # base_price = price напрямую (0% скидка)
                             base_price = round(price, 2)
                         except (ValueError, TypeError):
                             pass
+
+                    # pack_qty из колонки ПАКЕТ/УПАКОВКА
+                    pack_qty = 1
+                    box_qty = None
+                    if pack_col is not None and pd.notna(row.iloc[pack_col]):
+                        val = str(row.iloc[pack_col]).strip()
+                        # Формат может быть "25" или "55/660" (пакет/коробка)
+                        if '/' in val:
+                            parts = val.split('/')
+                            try:
+                                pack_qty = int(parts[0])
+                                box_qty = int(parts[1]) if len(parts) > 1 else None
+                            except (ValueError, TypeError):
+                                pack_qty = extract_pack_qty(name)
+                        else:
+                            try:
+                                pack_qty = int(float(val))
+                            except (ValueError, TypeError):
+                                pack_qty = extract_pack_qty(name)
+                    else:
+                        pack_qty = extract_pack_qty(name)
+
+                    # Атрибуты (толщина, коробка, резьба)
+                    attributes = {}
+                    if thickness_col is not None and pd.notna(row.iloc[thickness_col]):
+                        try:
+                            attributes['thickness'] = float(row.iloc[thickness_col])
+                        except (ValueError, TypeError):
+                            pass
+                    # box_qty из колонки или из формата "пакет/коробка"
+                    if box_col is not None and pd.notna(row.iloc[box_col]):
+                        try:
+                            attributes['box_qty'] = int(row.iloc[box_col])
+                        except (ValueError, TypeError):
+                            pass
+                    elif box_qty:
+                        attributes['box_qty'] = box_qty
+                    # Тип резьбы из названия
+                    thread = extract_thread_type(name)
+                    if thread:
+                        attributes['thread_type'] = thread
 
                     products.append({
                         'sku': sku,
@@ -195,7 +276,8 @@ class ExcelService:
                         'unit': 'шт',
                         'price': price,
                         'base_price': base_price,
-                        'attributes': {}
+                        'pack_qty': pack_qty,
+                        'attributes': attributes
                     })
 
             except Exception as e:
@@ -228,16 +310,21 @@ class ExcelService:
         """Экспорт обработанного заказа в Excel для 1С"""
         rows = []
         for item in order_data:
+            qty = item.get('quantity', 1)
+            orig_qty = item.get('original_quantity')
             row = {
                 'Артикул клиента': item.get('client_sku', ''),
                 'Название клиента': item.get('client_name', ''),
-                'Количество': item.get('quantity', 1),
+                'Количество': qty,
             }
+            if orig_qty and orig_qty != qty:
+                row['Исходное кол-во'] = orig_qty
 
             if include_mapping:
                 match = item.get('match', {})
                 row['Артикул поставщика'] = match.get('product_sku', '')
                 row['Название поставщика'] = match.get('product_name', '')
+                row['Упаковка'] = match.get('pack_qty', 1)
                 row['Совпадение %'] = match.get('confidence', 0)
                 row['Тип маппинга'] = match.get('match_type', '')
                 row['Требует проверки'] = 'Да' if match.get('needs_review', True) else 'Нет'

@@ -89,13 +89,21 @@ async def upload_catalog(file: UploadFile = File(...)):
 async def search_products(query: str, limit: int = 10):
     """Поиск товаров по названию или артикулу"""
     db = get_supabase_client()
-    # Поиск по SKU
     response = db.table('products')\
         .select('*')\
-        .or_(f"sku.ilike.%{query}%,name.ilike.%{query}%")\
+        .ilike('sku', f'%{query}%')\
         .limit(limit)\
         .execute()
-    return response.data or []
+    sku_results = response.data or []
+    if len(sku_results) < limit:
+        name_resp = db.table('products')\
+            .select('*')\
+            .ilike('name', f'%{query}%')\
+            .limit(limit - len(sku_results))\
+            .execute()
+        seen = {r['id'] for r in sku_results}
+        sku_results.extend([r for r in (name_resp.data or []) if r['id'] not in seen])
+    return sku_results
 
 # Уровни скидок (50-60% с шагом 1%)
 DISCOUNT_LEVELS = list(range(50, 61))

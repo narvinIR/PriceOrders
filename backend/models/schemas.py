@@ -12,6 +12,7 @@ class ProductBase(BaseModel):
     unit: str = "шт"
     price: Optional[float] = None
     base_price: Optional[float] = None
+    pack_qty: int = 1  # Количество в упаковке
     attributes: dict = Field(default_factory=dict)
 
 class ProductCreate(ProductBase):
@@ -86,6 +87,7 @@ class OrderItem(OrderItemBase):
     mapping_type: Optional[str] = None
     needs_review: bool = False
     reviewed: bool = False
+    original_quantity: Optional[float] = None  # Исходное кол-во до округления
     # Populated from join
     product: Optional[Product] = None
 

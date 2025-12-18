@@ -1,9 +1,33 @@
+import re
 from uuid import UUID
 from fuzzywuzzy import fuzz
 from backend.models.database import get_supabase_client
-from backend.utils.normalizers import normalize_sku, normalize_name, extract_numeric_sku
+from backend.utils.normalizers import normalize_sku, normalize_name
 from backend.config import settings
 from backend.models.schemas import MatchResult
+
+
+def is_eco_product(name: str) -> bool:
+    """Проверка является ли товар ЭКО (эконом) версией"""
+    name_lower = name.lower()
+    return 'эко' in name_lower or 'eko' in name_lower or '(2.2)' in name_lower
+
+
+def extract_mm_from_clamp(client_name: str) -> int | None:
+    """Извлечь размер в мм из запроса хомута"""
+    m = re.search(r'\bхомут\s+(\d+)\b', client_name.lower())
+    return int(m.group(1)) if m else None
+
+
+def clamp_fits_mm(product_name: str, target_mm: int) -> bool:
+    """Проверить подходит ли хомут по диапазону мм"""
+    # Формат: (107-115) или (87-92)
+    m = re.search(r'\((\d+)-(\d+)\)', product_name)
+    if m:
+        mm_min, mm_max = int(m.group(1)), int(m.group(2))
+        return mm_min <= target_mm <= mm_max
+    return False
+
 
 class MatchingService:
     """6-уровневый алгоритм маппинга артикулов"""
@@ -117,25 +141,55 @@ class MatchingService:
 
         # Level 5: Fuzzy название
         if norm_name:
-            best_name_match = None
-            best_name_ratio = 0
+            # Собираем все совпадения выше порога
+            matches = []
             for product in products:
                 prod_norm_name = normalize_name(product['name'])
-                # Token sort ratio лучше для перестановок слов
-                ratio = fuzz.token_sort_ratio(norm_name, prod_norm_name)
-                if ratio > best_name_ratio and ratio >= settings.fuzzy_threshold:
-                    best_name_ratio = ratio
-                    best_name_match = product
+                # Используем max из token_sort и token_set для лучшего покрытия
+                ratio = max(
+                    fuzz.token_sort_ratio(norm_name, prod_norm_name),
+                    fuzz.token_set_ratio(norm_name, prod_norm_name)
+                )
+                if ratio >= settings.fuzzy_threshold:
+                    matches.append((product, ratio))
 
-            if best_name_match:
-                confidence = settings.confidence_fuzzy_name * (best_name_ratio / 100)
+            if matches:
+                # Сортируем по ratio (убывание)
+                matches.sort(key=lambda x: x[1], reverse=True)
+                best_ratio = matches[0][1]
+
+                # Фильтруем только лучшие (с отклонением <=2%)
+                top_matches = [m for m in matches if m[1] >= best_ratio - 2]
+
+                # Для хомутов - фильтруем по диапазону мм
+                clamp_mm = extract_mm_from_clamp(client_name or "")
+                if clamp_mm and len(top_matches) > 1:
+                    fitting = [m for m in top_matches
+                               if clamp_fits_mm(m[0]['name'], clamp_mm)]
+                    if fitting:
+                        top_matches = fitting
+
+                # Если клиент НЕ указал ЭКО - предпочитаем стандарт
+                client_wants_eco = is_eco_product(client_name or "")
+                if not client_wants_eco and len(top_matches) > 1:
+                    non_eco = [m for m in top_matches
+                               if not is_eco_product(m[0]['name'])]
+                    if non_eco:
+                        top_matches = non_eco
+
+                best_match, best_ratio = top_matches[0]
+                conf = settings.confidence_fuzzy_name * (best_ratio / 100)
+                # Повышаем confidence если выбрали правильный вариант
+                if len(matches) > 1 and not client_wants_eco:
+                    conf = min(conf + 5, 95.0)  # Бонус за выбор стандарта
+
                 return MatchResult(
-                    product_id=UUID(best_name_match['id']),
-                    product_sku=best_name_match['sku'],
-                    product_name=best_name_match['name'],
-                    confidence=confidence,
+                    product_id=UUID(best_match['id']),
+                    product_sku=best_match['sku'],
+                    product_name=best_match['name'],
+                    confidence=conf,
                     match_type="fuzzy_name",
-                    needs_review=confidence < settings.min_confidence_auto
+                    needs_review=conf < settings.min_confidence_auto
                 )
 
         # Level 6: Не найдено - требует ручной проверки
