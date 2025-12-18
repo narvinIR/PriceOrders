@@ -1,0 +1,29 @@
+# PriceOrders MVP - Dependencies
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Database
+supabase>=2.0.0
+
+# Data Processing
+pandas>=2.1.0
+openpyxl>=3.1.0
+
+# Fuzzy Matching
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.23.0
+
+# Frontend
+streamlit>=1.28.0
+
+# Utils
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Optional: ML Matching (install separately if needed)
+# sentence-transformers>=2.2.0
+# faiss-cpu>=1.7.4
