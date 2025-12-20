@@ -1,6 +1,35 @@
 import re
 import unicodedata
 
+# Синонимы материалов - приводим к полной форме
+MATERIAL_SYNONYMS = {
+    'пп': 'полипропилен',
+    'pp': 'полипропилен',
+    'пэ': 'полиэтилен',
+    'pe': 'полиэтилен',
+    'пвх': 'поливинилхлорид',
+    'pvc': 'поливинилхлорид',
+    'ппр': 'полипропилен',
+    'ppr': 'полипропилен',
+    'pert': 'полиэтилен',
+    'pe-rt': 'полиэтилен',
+}
+
+# Синонимы типов товаров
+PRODUCT_SYNONYMS = {
+    'колено': 'отвод',
+    'угол': 'отвод',
+    'elbow': 'отвод',
+    'тройник': 'тройник',
+    'tee': 'тройник',
+    'муфта': 'муфта',
+    'coupling': 'муфта',
+    'заглушка': 'заглушка',
+    'cap': 'заглушка',
+    'plug': 'заглушка',
+    'кан': 'канализационн',  # кан. → канализационн
+}
+
 # Таблица соответствия диаметров труб (мм) размерам хомутов (дюймы)
 PIPE_MM_TO_INCH = {
     15: '3/8"', 16: '3/8"', 19: '3/8"',
@@ -16,6 +45,18 @@ PIPE_MM_TO_INCH = {
     140: '5"', 142: '5"',
     160: '6"', 166: '6"',
 }
+
+def expand_synonyms(text: str) -> str:
+    """Заменяет сокращения материалов и типов на полные формы"""
+    result = text.lower()
+    # Заменяем материалы (как отдельные слова)
+    for abbr, full in MATERIAL_SYNONYMS.items():
+        result = re.sub(rf'\b{re.escape(abbr)}\b', full, result)
+    # Заменяем типы товаров
+    for abbr, full in PRODUCT_SYNONYMS.items():
+        result = re.sub(rf'\b{re.escape(abbr)}\.?\b', full, result)
+    return result
+
 
 def normalize_sku(sku: str) -> str:
     """Нормализация артикула для сравнения"""
@@ -39,6 +80,8 @@ def normalize_name(name: str) -> str:
     result = unicodedata.normalize('NFKC', result)
     # Заменяем ё на е
     result = result.replace('ё', 'е')
+    # Расширяем синонимы материалов и типов
+    result = expand_synonyms(result)
     # Убираем информацию об упаковке (уп 20 шт), (20 шт) и т.д.
     result = re.sub(r'\(уп\.?\s*\d+\s*шт\.?\)', '', result)
     result = re.sub(r'\(\d+\s*шт\)', '', result)
