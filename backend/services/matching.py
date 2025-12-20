@@ -227,18 +227,34 @@ class MatchingService:
             needs_review=True
         )
 
-    def match_order_items(self, client_id: UUID, items: list[dict]) -> list[dict]:
-        """Маппинг всех позиций заказа"""
+    def match_order_items(self, client_id: UUID, items: list[dict],
+                          auto_save: bool = True) -> list[dict]:
+        """
+        Маппинг всех позиций заказа.
+
+        Args:
+            client_id: ID клиента
+            items: Список позиций заказа
+            auto_save: Автоматически сохранять маппинги с высоким confidence
+        """
         results = []
         for item in items:
+            client_sku = item.get('client_sku', '')
             match = self.match_item(
                 client_id=client_id,
-                client_sku=item.get('client_sku', ''),
+                client_sku=client_sku,
                 client_name=item.get('client_name', '')
             )
+
+            # Автосохранение высокоточных маппингов
+            auto_saved = False
+            if auto_save and client_sku:
+                auto_saved = self.auto_save_high_confidence(client_id, client_sku, match)
+
             results.append({
                 **item,
-                'match': match.model_dump()
+                'match': match.model_dump(),
+                'auto_saved': auto_saved
             })
         return results
 
@@ -264,3 +280,29 @@ class MatchingService:
         client_key = str(client_id)
         if client_key in self._mappings_cache:
             del self._mappings_cache[client_key]
+
+    def auto_save_high_confidence(self, client_id: UUID, client_sku: str,
+                                   match: MatchResult) -> bool:
+        """
+        Автосохранение маппингов с высоким confidence (≥95%).
+        Сохраняет как unverified - требует ручного подтверждения.
+
+        Returns:
+            True если маппинг был сохранён
+        """
+        if (match.confidence >= settings.confidence_exact_name and
+            match.product_id is not None and
+            match.match_type in ("exact_sku", "exact_name", "cached_mapping")):
+            try:
+                self.save_mapping(
+                    client_id=client_id,
+                    client_sku=client_sku,
+                    product_id=match.product_id,
+                    confidence=match.confidence,
+                    match_type=match.match_type,
+                    verified=False  # Требует ручного подтверждения
+                )
+                return True
+            except Exception:
+                pass
+        return False
