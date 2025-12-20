@@ -19,6 +19,7 @@ MATERIAL_SYNONYMS = {
 PRODUCT_SYNONYMS = {
     'колено': 'отвод',
     'угол': 'отвод',
+    'угольник': 'отвод',
     'elbow': 'отвод',
     'тройник': 'тройник',
     'tee': 'тройник',
@@ -28,6 +29,17 @@ PRODUCT_SYNONYMS = {
     'cap': 'заглушка',
     'plug': 'заглушка',
     'кан': 'канализационн',  # кан. → канализационн
+    'нар кан': 'наружная канализация',
+    'нар.кан': 'наружная канализация',
+    'малошум': 'малошумная',
+    'вн рез': 'внутренняя резьба',
+    'вн.рез': 'внутренняя резьба',
+    'нар рез': 'наружная резьба',
+    'нар.рез': 'наружная резьба',
+    'в р': 'внутренняя резьба',
+    'в/р': 'внутренняя резьба',
+    'н р': 'наружная резьба',
+    'н/р': 'наружная резьба',
 }
 
 # Таблица соответствия диаметров труб (мм) размерам хомутов (дюймы)
@@ -52,8 +64,9 @@ def expand_synonyms(text: str) -> str:
     # Заменяем материалы (как отдельные слова)
     for abbr, full in MATERIAL_SYNONYMS.items():
         result = re.sub(rf'\b{re.escape(abbr)}\b', full, result)
-    # Заменяем типы товаров
-    for abbr, full in PRODUCT_SYNONYMS.items():
+    # Заменяем типы товаров (сортируем по длине - длинные первые)
+    sorted_synonyms = sorted(PRODUCT_SYNONYMS.items(), key=lambda x: len(x[0]), reverse=True)
+    for abbr, full in sorted_synonyms:
         result = re.sub(rf'\b{re.escape(abbr)}\.?\b', full, result)
     return result
 
@@ -108,9 +121,12 @@ def normalize_name(name: str) -> str:
     # Нормализуем размеры труб: 110-2000, 110х50, 110*50, 110×50 → 110×50
     # Сначала унифицируем разделители (-, x, х, X, Х, *, ×) → ×
     result = re.sub(r'(\d+)\s*[-xхXХ*×]\s*(\d+)', r'\1×\2', result)
-    # Убираем Jk/Jakko - весь каталог Jakko, не нужно для сравнения
+    # Убираем Jk/Jakko/Prestige - весь каталог Jakko, не нужно для сравнения
     result = re.sub(r'\bjk\b', '', result)
     result = re.sub(r'\bjakko\b', '', result)
+    result = re.sub(r'\bprestige\b', '', result)
+    # Нормализуем PN (давление): PN 10, PN-10, PN10 → pn10
+    result = re.sub(r'\bpn\s*[-]?\s*(\d+)', r'pn\1', result)
     # Убираем лишние пробелы
     result = ' '.join(result.split())
     # Убираем знаки препинания кроме пробелов
