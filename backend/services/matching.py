@@ -5,6 +5,7 @@ from backend.models.database import get_supabase_client
 from backend.utils.normalizers import normalize_sku, normalize_name
 from backend.config import settings
 from backend.models.schemas import MatchResult
+from backend.services.embeddings import get_embedding_matcher
 
 
 def is_eco_product(name: str) -> bool:
@@ -30,18 +31,25 @@ def clamp_fits_mm(product_name: str, target_mm: int) -> bool:
 
 
 class MatchingService:
-    """6-уровневый алгоритм маппинга артикулов"""
+    """7-уровневый алгоритм маппинга артикулов"""
 
     def __init__(self):
         self.db = get_supabase_client()
         self._products_cache = None
         self._mappings_cache = {}
+        self._embedding_matcher = get_embedding_matcher()
 
     def _load_products(self) -> list[dict]:
-        """Загрузка каталога товаров"""
+        """Загрузка каталога товаров и построение embedding индекса"""
         if self._products_cache is None:
             response = self.db.table('products').select('*').execute()
             self._products_cache = response.data or []
+            # Строим embedding индекс для семантического поиска
+            if self._products_cache and not self._embedding_matcher.is_ready:
+                try:
+                    self._embedding_matcher.build_index(self._products_cache)
+                except Exception:
+                    pass  # ML не обязателен, продолжаем без него
         return self._products_cache
 
     def _load_client_mappings(self, client_id: UUID) -> dict:
@@ -66,13 +74,14 @@ class MatchingService:
 
     def match_item(self, client_id: UUID, client_sku: str, client_name: str = None) -> MatchResult:
         """
-        6-уровневый алгоритм маппинга:
+        7-уровневый алгоритм маппинга:
         1. Точное совпадение артикула → 100%
         2. Точное совпадение названия → 95%
         3. Кэшированный маппинг → 100%
         4. Fuzzy SKU (Levenshtein dist ≤ 1) → 90%
-        5. Fuzzy название (ratio > 85) → 80%
-        6. Требует ручной проверки → 0%
+        5. Fuzzy название (ratio ≥ 75) → 80%
+        6. Semantic embedding (ML) → ≤75%
+        7. Требует ручной проверки → 0%
         """
         products = self._load_products()
         mappings = self._load_client_mappings(client_id)
@@ -192,7 +201,23 @@ class MatchingService:
                     needs_review=conf < settings.min_confidence_auto
                 )
 
-        # Level 6: Не найдено - требует ручной проверки
+        # Level 7: Semantic embedding search (ML)
+        if self._embedding_matcher.is_ready and client_name:
+            result = self._embedding_matcher.get_best_match(client_name, min_score=0.6)
+            if result:
+                product, score = result
+                # Конвертируем score (0-1) в confidence (0-100)
+                conf = score * 100 * 0.75  # max 75% для ML (требует проверки)
+                return MatchResult(
+                    product_id=UUID(product['id']),
+                    product_sku=product['sku'],
+                    product_name=product['name'],
+                    confidence=conf,
+                    match_type="semantic_embedding",
+                    needs_review=True  # ML всегда требует проверки
+                )
+
+        # Level 8: Не найдено - требует ручной проверки
         return MatchResult(
             product_id=None,
             product_sku=None,
