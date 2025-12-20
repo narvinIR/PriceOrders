@@ -33,6 +33,12 @@ class TestIsEcoProduct:
         assert is_eco_product('Труба ПП 110×2000') is False
         assert is_eco_product('Труба ПП 110×2000 (2.7)') is False
 
+    def test_thickness_18_is_standard(self):
+        """(1.8) - стандарт для труб 32/40/50, не ЭКО"""
+        assert is_eco_product('Труба кан. ПП (1.8) 50-2000 Jakko') is False
+        assert is_eco_product('Труба кан. ПП (1.8) 32-1000 Jakko') is False
+        assert is_eco_product('Труба кан. ПП (1.8) 40-1500 Jakko') is False
+
 
 class TestExtractMmFromClamp:
     """Тесты для extract_mm_from_clamp()"""

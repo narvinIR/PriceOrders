@@ -14,8 +14,18 @@ logger = logging.getLogger(__name__)
 
 
 def is_eco_product(name: str) -> bool:
-    """Проверка является ли товар ЭКО (эконом) версией"""
+    """
+    Проверка является ли товар ЭКО (эконом) версией.
+
+    Толщины стенок:
+    - (1.8) для 32/40/50 мм = стандарт (не ЭКО)
+    - (2.2) для 110 мм = ЭКО (тонкостенная)
+    - (2.7) для 110 мм = стандарт
+    """
     name_lower = name.lower()
+    # (1.8) - стандарт для труб 32/40/50, явно не ЭКО
+    if '(1.8)' in name_lower:
+        return False
     return 'эко' in name_lower or 'eko' in name_lower or '(2.2)' in name_lower
 
 
