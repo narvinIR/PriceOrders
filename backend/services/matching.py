@@ -1,11 +1,16 @@
 import re
+import logging
 from uuid import UUID
 from fuzzywuzzy import fuzz
 from backend.models.database import get_supabase_client
-from backend.utils.normalizers import normalize_sku, normalize_name
+from backend.utils.normalizers import (
+    normalize_sku, normalize_name, extract_pipe_size
+)
 from backend.config import settings
 from backend.models.schemas import MatchResult
 from backend.services.embeddings import get_embedding_matcher
+
+logger = logging.getLogger(__name__)
 
 
 def is_eco_product(name: str) -> bool:
@@ -38,6 +43,17 @@ class MatchingService:
         self._products_cache = None
         self._mappings_cache = {}
         self._embedding_matcher = get_embedding_matcher()
+        self._stats = {
+            'total': 0,
+            'exact_sku': 0,
+            'exact_name': 0,
+            'cached_mapping': 0,
+            'fuzzy_sku': 0,
+            'fuzzy_name': 0,
+            'semantic_embedding': 0,
+            'not_found': 0,
+            'total_confidence': 0.0,
+        }
 
     def _load_products(self) -> list[dict]:
         """Загрузка каталога товаров и построение embedding индекса"""
@@ -72,6 +88,45 @@ class MatchingService:
         self._products_cache = None
         self._mappings_cache = {}
 
+    def get_stats(self) -> dict:
+        """Получить статистику matching"""
+        stats = self._stats.copy()
+        if stats['total'] > 0:
+            stats['avg_confidence'] = round(
+                stats['total_confidence'] / stats['total'], 1
+            )
+            stats['success_rate'] = round(
+                100 * (stats['total'] - stats['not_found']) / stats['total'], 1
+            )
+        else:
+            stats['avg_confidence'] = 0.0
+            stats['success_rate'] = 0.0
+        return stats
+
+    def reset_stats(self):
+        """Сбросить статистику"""
+        for key in self._stats:
+            self._stats[key] = 0 if isinstance(self._stats[key], int) else 0.0
+
+    def _update_stats(self, match: MatchResult):
+        """Обновить статистику после match"""
+        self._stats['total'] += 1
+        self._stats['total_confidence'] += match.confidence
+        if match.match_type in self._stats:
+            self._stats[match.match_type] += 1
+
+    def _finalize_match(self, match: MatchResult) -> MatchResult:
+        """Финализировать результат: логирование + статистика"""
+        self._update_stats(match)
+        if match.product_id:
+            logger.info(
+                f"Matched: {match.match_type} @ {match.confidence:.0f}% "
+                f"→ {match.product_sku}"
+            )
+        else:
+            logger.warning(f"Not found: {match.match_type}")
+        return match
+
     def match_item(self, client_id: UUID, client_sku: str, client_name: str = None) -> MatchResult:
         """
         7-уровневый алгоритм маппинга:
@@ -83,6 +138,8 @@ class MatchingService:
         6. Semantic embedding (ML) → ≤75%
         7. Требует ручной проверки → 0%
         """
+        logger.debug(f"Matching: sku={client_sku!r}, name={client_name!r}")
+
         products = self._load_products()
         mappings = self._load_client_mappings(client_id)
 
@@ -94,39 +151,39 @@ class MatchingService:
             mapping = mappings[norm_sku]
             product = next((p for p in products if str(p['id']) == str(mapping['product_id'])), None)
             if product:
-                return MatchResult(
+                return self._finalize_match(MatchResult(
                     product_id=UUID(product['id']),
                     product_sku=product['sku'],
                     product_name=product['name'],
                     confidence=settings.confidence_exact_sku,
                     match_type="cached_mapping",
                     needs_review=False
-                )
+                ))
 
         # Level 1: Точное совпадение артикула
         for product in products:
             if normalize_sku(product['sku']) == norm_sku:
-                return MatchResult(
+                return self._finalize_match(MatchResult(
                     product_id=UUID(product['id']),
                     product_sku=product['sku'],
                     product_name=product['name'],
                     confidence=settings.confidence_exact_sku,
                     match_type="exact_sku",
                     needs_review=False
-                )
+                ))
 
         # Level 2: Точное совпадение названия
         if norm_name:
             for product in products:
                 if normalize_name(product['name']) == norm_name:
-                    return MatchResult(
+                    return self._finalize_match(MatchResult(
                         product_id=UUID(product['id']),
                         product_sku=product['sku'],
                         product_name=product['name'],
                         confidence=settings.confidence_exact_name,
                         match_type="exact_name",
                         needs_review=False
-                    )
+                    ))
 
         # Level 4: Fuzzy SKU (Levenshtein distance ≤ 1)
         best_sku_match = None
@@ -139,20 +196,29 @@ class MatchingService:
                 best_sku_match = product
 
         if best_sku_match and best_sku_ratio >= 90:
-            return MatchResult(
+            return self._finalize_match(MatchResult(
                 product_id=UUID(best_sku_match['id']),
                 product_sku=best_sku_match['sku'],
                 product_name=best_sku_match['name'],
                 confidence=settings.confidence_fuzzy_sku * (best_sku_ratio / 100),
                 match_type="fuzzy_sku",
                 needs_review=best_sku_ratio < 95
-            )
+            ))
 
         # Level 5: Fuzzy название
         if norm_name:
+            # Извлекаем размеры из клиентского запроса
+            client_size = extract_pipe_size(client_name or "")
+
             # Собираем все совпадения выше порога
             matches = []
             for product in products:
+                # Проверка точного размера (если указан)
+                if client_size:
+                    product_size = extract_pipe_size(product['name'])
+                    if product_size and product_size != client_size:
+                        continue  # Пропускаем товар с другим размером
+
                 prod_norm_name = normalize_name(product['name'])
                 # Используем max из token_sort и token_set для лучшего покрытия
                 ratio = max(
@@ -192,14 +258,14 @@ class MatchingService:
                 if len(matches) > 1 and not client_wants_eco:
                     conf = min(conf + 5, 95.0)  # Бонус за выбор стандарта
 
-                return MatchResult(
+                return self._finalize_match(MatchResult(
                     product_id=UUID(best_match['id']),
                     product_sku=best_match['sku'],
                     product_name=best_match['name'],
                     confidence=conf,
                     match_type="fuzzy_name",
                     needs_review=conf < settings.min_confidence_auto
-                )
+                ))
 
         # Level 7: Semantic embedding search (ML)
         if self._embedding_matcher.is_ready and client_name:
@@ -208,24 +274,24 @@ class MatchingService:
                 product, score = result
                 # Конвертируем score (0-1) в confidence (0-100)
                 conf = score * 100 * 0.75  # max 75% для ML (требует проверки)
-                return MatchResult(
+                return self._finalize_match(MatchResult(
                     product_id=UUID(product['id']),
                     product_sku=product['sku'],
                     product_name=product['name'],
                     confidence=conf,
                     match_type="semantic_embedding",
                     needs_review=True  # ML всегда требует проверки
-                )
+                ))
 
         # Level 8: Не найдено - требует ручной проверки
-        return MatchResult(
+        return self._finalize_match(MatchResult(
             product_id=None,
             product_sku=None,
             product_name=None,
             confidence=0.0,
             match_type="not_found",
             needs_review=True
-        )
+        ))
 
     def match_order_items(self, client_id: UUID, items: list[dict],
                           auto_save: bool = True) -> list[dict]:

@@ -148,3 +148,48 @@ def tokenize_name(name: str) -> set[str]:
     stop_words = {'для', 'и', 'или', 'с', 'на', 'по', 'из', 'к', 'в', 'от', 'до', 'шт', 'мм', 'см', 'м', 'кг', 'г', 'л', 'мл'}
     tokens = set(normalized.split())
     return tokens - stop_words
+
+
+def extract_pipe_size(name: str) -> tuple[int, int] | None:
+    """
+    Извлекает размеры трубы (диаметр×длина) из названия.
+    Возвращает (diameter, length) или None если не найдено.
+
+    Примеры:
+        "Труба ПП 110×2000" → (110, 2000)
+        "Труба 50x1500" → (50, 1500)
+        "Труба 32-500" → (32, 500)
+    """
+    if not name:
+        return None
+    # Ищем паттерн: число × число (с разными разделителями)
+    m = re.search(r'(\d+)\s*[×xхXХ*\-]\s*(\d+)', name)
+    if m:
+        diameter = int(m.group(1))
+        length = int(m.group(2))
+        # Валидация: диаметр 16-400мм, длина 100-6000мм
+        if 16 <= diameter <= 400 and 100 <= length <= 6000:
+            return (diameter, length)
+    return None
+
+
+def extract_fitting_size(name: str) -> tuple[int, ...] | None:
+    """
+    Извлекает размеры фитинга из названия.
+    Может быть 1-3 размера: диаметр, или диаметр×диаметр (переход).
+
+    Примеры:
+        "Муфта ППР 32" → (32,)
+        "Переход 50×32" → (50, 32)
+        "Тройник 63×50×63" → (63, 50, 63)
+    """
+    if not name:
+        return None
+    # Ищем паттерн с 1-3 размерами
+    m = re.search(r'(\d+)(?:\s*[×xхXХ*\-]\s*(\d+))?(?:\s*[×xхXХ*\-]\s*(\d+))?', name)
+    if m:
+        sizes = [int(s) for s in m.groups() if s]
+        # Валидация: размеры фитингов 16-160мм
+        if all(16 <= s <= 160 for s in sizes):
+            return tuple(sizes)
+    return None
