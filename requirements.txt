@@ -27,3 +27,6 @@ pydantic-settings>=2.1.0
 # ML Matching (embeddings)
 sentence-transformers>=2.2.0
 faiss-cpu>=1.7.4
+
+# Telegram Bot
+aiogram>=3.4.0
