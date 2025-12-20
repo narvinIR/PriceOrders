@@ -62,8 +62,9 @@ def normalize_name(name: str) -> str:
     result = re.sub(r'\bхомут\s+(\d+)\b', convert_clamp_mm_to_inch, result)
     # Убираем цвет "серый" (по умолчанию)
     result = re.sub(r'\bсерый\b', '', result)
-    # Нормализуем размеры: 110х50 → 110 50
-    result = re.sub(r'(\d+)[хx](\d+)', r'\1 \2', result)
+    # Нормализуем размеры труб: 110-2000, 110х50, 110*50, 110×50 → 110×50
+    # Сначала унифицируем разделители (-, x, х, X, Х, *, ×) → ×
+    result = re.sub(r'(\d+)\s*[-xхXХ*×]\s*(\d+)', r'\1×\2', result)
     # Убираем Jk/Jakko - весь каталог Jakko, не нужно для сравнения
     result = re.sub(r'\bjk\b', '', result)
     result = re.sub(r'\bjakko\b', '', result)
