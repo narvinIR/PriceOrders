@@ -70,6 +70,17 @@ dp.shutdown.register(on_shutdown)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle для FastAPI"""
+    # Прогрев ML модели ДО приёма запросов (иначе webhook таймаутит)
+    logger.info("🔥 Прогрев MatchingService...")
+    try:
+        from bot.handlers.upload import get_matcher
+        matcher = get_matcher()
+        # Тестовый запрос для полной инициализации
+        matcher.match_item(None, "test", "test")
+        logger.info("✅ MatchingService готов")
+    except Exception as e:
+        logger.error(f"❌ Ошибка прогрева: {e}")
+
     if WEBHOOK_MODE:
         webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
         await bot.set_webhook(webhook_url)
