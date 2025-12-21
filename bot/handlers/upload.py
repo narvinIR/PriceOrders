@@ -46,57 +46,68 @@ async def process_items(message: Message, items: list):
     logger.info(f"⚙️ process_items: {len(items)} позиций")
     await message.answer(f"📊 Найдено {len(items)} позиций. Запускаю matching...")
 
-    logger.info("⏳ Инициализация matcher...")
-    matcher = get_matcher()
-    logger.info("✅ Matcher готов, начинаю matching...")
+    try:
+        logger.info("⏳ Инициализация matcher...")
+        matcher = get_matcher()
+        logger.info("✅ Matcher готов")
+    except Exception as e:
+        logger.error(f"❌ Ошибка инициализации matcher: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка подключения к базе: {e}")
+        return
+
     client_id = None
 
     results = []
     matched = 0
     not_found = 0
 
-    for item in items:
-        client_sku = item.get('sku', '')
-        client_name = item.get('name', '')
-        qty = item.get('qty', 1)
+    try:
+        for item in items:
+            client_sku = item.get('sku', '')
+            client_name = item.get('name', '')
+            qty = item.get('qty', 1)
 
-        result = matcher.match_item(
-            client_id=client_id,
-            client_sku=client_sku,
-            client_name=client_name or client_sku
-        )
+            result = matcher.match_item(
+                client_id=client_id,
+                client_sku=client_sku,
+                client_name=client_name or client_sku
+            )
 
-        if result.product_sku:
-            pack_qty = result.pack_qty or 1
-            if pack_qty > 1 and qty > 0:
-                packs_needed = (qty + pack_qty - 1) // pack_qty
-                total_qty = packs_needed * pack_qty
+            if result.product_sku:
+                pack_qty = result.pack_qty or 1
+                if pack_qty > 1 and qty > 0:
+                    packs_needed = (qty + pack_qty - 1) // pack_qty
+                    total_qty = packs_needed * pack_qty
+                else:
+                    total_qty = qty
+
+                results.append({
+                    'Запрос': client_sku or client_name,
+                    'Артикул Jakko': result.product_sku,
+                    'Название Jakko': result.product_name,
+                    'Кол-во': total_qty,
+                    'Упаковка': pack_qty,
+                    'Точность': f"{result.confidence:.0f}%",
+                    'Метод': result.match_type,
+                })
+                matched += 1
             else:
-                total_qty = qty
+                results.append({
+                    'Запрос': client_sku or client_name,
+                    'Артикул Jakko': '❌ НЕ НАЙДЕНО',
+                    'Название Jakko': '',
+                    'Кол-во': qty,
+                    'Упаковка': 1,
+                    'Точность': '0%',
+                    'Метод': 'not_found',
+                })
+                not_found += 1
+    except Exception as e:
+        logger.error(f"❌ Ошибка matching: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка при обработке: {e}")
+        return
 
-            results.append({
-                'Запрос': client_sku or client_name,
-                'Артикул Jakko': result.product_sku,
-                'Название Jakko': result.product_name,
-                'Кол-во': total_qty,
-                'Упаковка': pack_qty,
-                'Точность': f"{result.confidence:.0f}%",
-                'Метод': result.match_type,
-            })
-            matched += 1
-        else:
-            results.append({
-                'Запрос': client_sku or client_name,
-                'Артикул Jakko': '❌ НЕ НАЙДЕНО',
-                'Название Jakko': '',
-                'Кол-во': qty,
-                'Упаковка': 1,
-                'Точность': '0%',
-                'Метод': 'not_found',
-            })
-            not_found += 1
-
-    logger.info(f"✅ Matching завершён: {matched} найдено, {not_found} не найдено")
+    logger.info(f"✅ Matching: {matched} найдено, {not_found} не найдено")
 
     # Создаём Excel файл
     df = pd.DataFrame(results)
