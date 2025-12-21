@@ -241,11 +241,6 @@ async def handle_text_list(message: Message):
         return
 
     lines = text.split('\n')
-
-    # Если только одна строка и она короткая - это может быть обычное сообщение
-    if len(lines) == 1 and len(text) < 10:
-        return
-
     items = []
     for line in lines:
         line = line.strip()
@@ -272,9 +267,16 @@ async def handle_text_list(message: Message):
             items.append({'sku': sku, 'name': '', 'qty': qty})
 
     if items:
-        logger.info(f"📝 Получено {len(items)} позиций от user {message.from_user.id}")
+        logger.info(f"📝 Получено {len(items)} позиций")
         try:
             await process_items(message, items)
         except Exception as e:
-            logger.error(f"❌ Ошибка process_items: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка: {e}", exc_info=True)
             await message.answer(f"❌ Ошибка обработки: {e}")
+    else:
+        await message.answer(
+            "🔍 Отправьте артикул или название товара.\n\n"
+            "<b>Примеры:</b>\n"
+            "<code>Труба ПП 110×2000</code>\n"
+            "<code>202051110R</code>"
+        )
