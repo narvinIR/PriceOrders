@@ -9,6 +9,7 @@ from backend.utils.normalizers import (
 from backend.config import settings
 from backend.models.schemas import MatchResult
 from backend.services.embeddings import get_embedding_matcher
+from backend.services.llm_matcher import get_llm_matcher
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +294,7 @@ class MatchingService:
             'cached_mapping': 0,
             'fuzzy_sku': 0,
             'fuzzy_name': 0,
+            'llm_match': 0,
             'semantic_embedding': 0,
             'not_found': 0,
             'total_confidence': 0.0,
@@ -544,6 +546,32 @@ class MatchingService:
                 if len(matches) > 1 and not client_wants_eco:
                     conf = min(conf + 5, 95.0)
 
+                # Если confidence низкий (<75%) - проверить через LLM
+                if conf < 75:
+                    llm = get_llm_matcher()
+                    if llm:
+                        if not llm.is_ready:
+                            llm.set_products(products)
+                        llm_result = llm.match(client_name)
+                        if llm_result and llm_result.get("sku"):
+                            llm_conf = float(llm_result.get("confidence", 0))
+                            if llm_conf > conf:
+                                llm_product = next(
+                                    (p for p in products
+                                     if p["sku"] == llm_result["sku"]),
+                                    None
+                                )
+                                if llm_product:
+                                    return self._finalize_match(MatchResult(
+                                        product_id=UUID(llm_product['id']),
+                                        product_sku=llm_product['sku'],
+                                        product_name=llm_product['name'],
+                                        confidence=llm_conf,
+                                        match_type="llm_match",
+                                        needs_review=llm_conf < 80,
+                                        pack_qty=llm_product.get('pack_qty', 1)
+                                    ))
+
                 return self._finalize_match(MatchResult(
                     product_id=UUID(best_match['id']),
                     product_sku=best_match['sku'],
@@ -554,19 +582,44 @@ class MatchingService:
                     pack_qty=best_match.get('pack_qty', 1)
                 ))
 
-        # Level 7: Semantic embedding search (ML) с фильтрами
+        # Level 7: LLM matching через OpenRouter API
+        llm = get_llm_matcher()
+        if llm and client_name:
+            # Инициализируем каталог если ещё не загружен
+            if not llm.is_ready:
+                llm.set_products(products)
+
+            result = llm.match(client_name)
+            if result and result.get("sku"):
+                # Ищем товар по SKU из ответа LLM
+                product = next(
+                    (p for p in products if p["sku"] == result["sku"]),
+                    None
+                )
+                if product:
+                    conf = float(result.get("confidence", 70))
+                    return self._finalize_match(MatchResult(
+                        product_id=UUID(product['id']),
+                        product_sku=product['sku'],
+                        product_name=product['name'],
+                        confidence=conf,
+                        match_type="llm_match",
+                        needs_review=conf < 80,
+                        pack_qty=product.get('pack_qty', 1)
+                    ))
+
+        # Fallback: Semantic embedding (если LLM недоступен)
         if self._embedding_matcher.is_ready and client_name:
-            # Получаем топ-20 кандидатов для фильтрации (больше для лучшего отбора)
-            results = self._embedding_matcher.search(client_name, top_k=20, min_score=0.4)
+            results = self._embedding_matcher.search(
+                client_name, top_k=20, min_score=0.4
+            )
             if results:
-                # Извлекаем параметры клиента
                 client_cat = detect_client_category(client_name)
                 client_type = extract_product_type(client_name)
                 client_angle = extract_angle(client_name)
                 client_thread = extract_thread_type(client_name)
                 client_fitting_size = extract_fitting_size(client_name)
 
-                # Применяем те же фильтры что и для fuzzy
                 filtered = filter_by_product_type(results, client_type)
                 filtered = filter_by_angle(filtered, client_angle)
                 filtered = filter_by_thread(filtered, client_thread)
@@ -575,7 +628,7 @@ class MatchingService:
 
                 if filtered:
                     product, score = filtered[0]
-                    conf = score * 100 * 0.75  # max 75% для ML
+                    conf = score * 100 * 0.75
                     return self._finalize_match(MatchResult(
                         product_id=UUID(product['id']),
                         product_sku=product['sku'],
