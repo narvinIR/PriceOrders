@@ -4,7 +4,7 @@ from uuid import UUID
 from fuzzywuzzy import fuzz
 from backend.models.database import get_supabase_client
 from backend.utils.normalizers import (
-    normalize_sku, normalize_name, extract_pipe_size
+    normalize_sku, normalize_name, extract_pipe_size, extract_fitting_size
 )
 from backend.config import settings
 from backend.models.schemas import MatchResult
@@ -189,6 +189,45 @@ def filter_by_thread(matches: list, client_thread: str | None) -> list:
                 if extract_thread_type(get_product(m)['name']) == client_thread]
 
     return filtered if filtered else matches
+
+
+def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
+    """
+    Фильтрует по размерам фитинга (110/50, 110/110 и т.д.)
+
+    Логика:
+    - Если клиент указал 2 размера (110/50) - ищем точное совпадение
+    - Если клиент указал 1 размер (110) - предпочитаем одинаковые размеры (110-110),
+      если нет - тогда ищем по первому размеру
+    """
+    if not matches or not client_size or len(matches) <= 1:
+        return matches
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    # Если клиент указал 2+ размера - точное совпадение
+    if len(client_size) >= 2:
+        filtered = [m for m in matches
+                    if extract_fitting_size(get_product(m)['name']) == client_size]
+        return filtered if filtered else matches
+
+    # Если клиент указал 1 размер (110) - сначала ищем одинаковые размеры (110-110)
+    single_size = client_size[0]
+
+    # Приоритет 1: Одинаковые размеры (110-110, 50-50) - прямой фитинг
+    same_size = [m for m in matches
+                 if extract_fitting_size(get_product(m)['name']) == (single_size, single_size)]
+    if same_size:
+        return same_size
+
+    # Приоритет 2: Первый размер совпадает (110-50, 110-110)
+    first_match = [m for m in matches
+                   if (ps := extract_fitting_size(get_product(m)['name']))
+                   and ps[0] == single_size]
+    return first_match if first_match else matches
 
 
 def is_eco_product(name: str) -> bool:
@@ -412,6 +451,7 @@ class MatchingService:
         if norm_name:
             # Извлекаем параметры из клиентского запроса
             client_size = extract_pipe_size(client_name or "")
+            client_fitting_size = extract_fitting_size(client_name or "")
             client_cat = detect_client_category(client_name or "")
             client_type = extract_product_type(client_name or "")
             client_angle = extract_angle(client_name or "")
@@ -464,6 +504,9 @@ class MatchingService:
                 top_matches = filter_by_thread(top_matches, client_thread)
                 top_matches = filter_by_category(top_matches, client_cat)
 
+                # Фильтр по размерам фитингов (110/50 vs 110/110)
+                top_matches = filter_by_fitting_size(top_matches, client_fitting_size)
+
                 # Хомуты - фильтруем по диапазону мм
                 if clamp_mm and len(top_matches) > 1:
                     fitting = [m for m in top_matches
@@ -503,12 +546,14 @@ class MatchingService:
                 client_type = extract_product_type(client_name)
                 client_angle = extract_angle(client_name)
                 client_thread = extract_thread_type(client_name)
+                client_fitting_size = extract_fitting_size(client_name)
 
                 # Применяем те же фильтры что и для fuzzy
                 filtered = filter_by_product_type(results, client_type)
                 filtered = filter_by_angle(filtered, client_angle)
                 filtered = filter_by_thread(filtered, client_thread)
                 filtered = filter_by_category(filtered, client_cat)
+                filtered = filter_by_fitting_size(filtered, client_fitting_size)
 
                 if filtered:
                     product, score = filtered[0]
