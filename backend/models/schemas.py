@@ -123,3 +123,4 @@ class MatchResult(BaseModel):
     confidence: float
     match_type: str
     needs_review: bool
+    pack_qty: int = 1  # Количество в упаковке

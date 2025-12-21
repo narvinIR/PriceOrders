@@ -53,9 +53,11 @@ class TestNormalizeName:
         result = normalize_name('Jakko Труба ПП 110')
         assert 'jakko' not in result.lower()
 
-    def test_remove_brand_prestige(self):
+    def test_keep_prestige_line(self):
+        # Prestige - линейка малошумной канализации, НЕ удаляем
         result = normalize_name('Prestige Труба малошумная 110')
-        assert 'prestige' not in result.lower()
+        # 'малошумн*' конвертируется в 'prestige'
+        assert 'prestige' in result.lower()
 
     def test_remove_pack_qty(self):
         result = normalize_name('Отвод 50 (уп 20 шт)')

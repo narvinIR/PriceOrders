@@ -1,5 +1,6 @@
 """
 Telegram бот PriceOrders - сопоставление артикулов B2B.
+Паттерны из VlessReality: lifecycle hooks, bot commands.
 """
 import sys
 import asyncio
@@ -9,6 +10,7 @@ from contextlib import asynccontextmanager
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import BotCommand
 from fastapi import FastAPI
 import uvicorn
 
@@ -32,10 +34,39 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-# Регистрация роутеров
-dp.include_router(start.router)
-dp.include_router(search.router)
-dp.include_router(upload.router)
+# Регистрация роутеров (порядок важен!)
+# Команды должны быть ПЕРВЫМИ, текстовые сообщения ПОСЛЕДНИМИ
+dp.include_router(start.router)   # /start, /help, /stats
+dp.include_router(search.router)  # /search + callbacks
+dp.include_router(upload.router)  # F.document + F.text (последний!)
+
+
+async def on_startup(bot: Bot):
+    """Действия при запуске бота"""
+    logger.info("🚀 Bot is starting...")
+
+    # Регистрация команд в меню Telegram
+    await bot.set_my_commands([
+        BotCommand(command="start", description="🏠 Главное меню"),
+        BotCommand(command="search", description="🔍 Поиск товара"),
+        BotCommand(command="help", description="❓ Помощь"),
+        BotCommand(command="stats", description="📊 Статистика (admin)"),
+    ])
+
+    logger.info("✅ Bot commands registered")
+    logger.info("✅ Bot started successfully!")
+
+
+async def on_shutdown(bot: Bot):
+    """Действия при остановке бота"""
+    logger.info("🛑 Bot is shutting down...")
+    await bot.session.close()
+    logger.info("✅ Bot stopped")
+
+
+# Регистрация lifecycle hooks
+dp.startup.register(on_startup)
+dp.shutdown.register(on_shutdown)
 
 
 @asynccontextmanager

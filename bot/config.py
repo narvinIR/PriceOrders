@@ -1,18 +1,33 @@
 """
 Конфигурация Telegram бота PriceOrders.
+Паттерны из VlessReality: валидация обязательных переменных.
 """
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Telegram
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "752592725"))
+logger = logging.getLogger(__name__)
 
-# Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+# === Telegram (обязательные) ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is required")
+
+ADMIN_ID_STR = os.getenv("ADMIN_ID")
+if not ADMIN_ID_STR:
+    raise ValueError("ADMIN_ID environment variable is required")
+ADMIN_ID = int(ADMIN_ID_STR)
+
+logger.info(f"✅ Bot config loaded: ADMIN_ID={ADMIN_ID}")
+
+# === Supabase (обязательные) ===
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    logger.warning("⚠️ Supabase credentials not set - database features disabled")
 
 # Режим работы
 WEBHOOK_MODE = os.getenv("WEBHOOK_MODE", "false").lower() == "true"

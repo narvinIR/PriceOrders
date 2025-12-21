@@ -1,7 +1,7 @@
 """
 Обработчики /start и /help команд.
 """
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 
@@ -86,3 +86,7 @@ Success rate: {stats['success_rate']:.1f}%
         await message.answer(text)
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
+
+
+# Fallback handler удалён - перехватывал все сообщения и мешал другим роутерам
+# Теперь неизвестные сообщения просто игнорируются

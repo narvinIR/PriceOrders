@@ -1,42 +1,158 @@
 """
-Обработчик загрузки Excel файлов с заказами.
+Обработчик загрузки файлов и текстовых списков артикулов.
+Поддержка: Excel (.xlsx, .xls), CSV (.csv), текстовые списки.
+Возвращает результат в Excel файле.
 """
 import os
+import re
 import tempfile
+from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import Message, FSInputFile
 import pandas as pd
 
-from bot.config import CONFIDENCE_THRESHOLD
-
 router = Router()
+
+
+async def process_items(message: Message, items: list):
+    """
+    Обработка списка артикулов и вывод результата в Excel.
+
+    Args:
+        message: Telegram message
+        items: список dict с ключами 'sku', 'name', 'qty'
+    """
+    if not items:
+        await message.answer("❌ Не найдено позиций для обработки")
+        return
+
+    await message.answer(f"📊 Найдено {len(items)} позиций. Запускаю matching...")
+
+    from backend.services.matching import MatchingService
+    matcher = MatchingService()
+    client_id = None
+
+    results = []
+    matched = 0
+    not_found = 0
+
+    for item in items:
+        client_sku = item.get('sku', '')
+        client_name = item.get('name', '')
+        qty = item.get('qty', 1)
+
+        result = matcher.match_item(
+            client_id=client_id,
+            client_sku=client_sku,
+            client_name=client_name or client_sku
+        )
+
+        if result.product_sku:
+            pack_qty = result.pack_qty or 1
+            if pack_qty > 1 and qty > 0:
+                packs_needed = (qty + pack_qty - 1) // pack_qty
+                total_qty = packs_needed * pack_qty
+            else:
+                total_qty = qty
+
+            results.append({
+                'Запрос': client_sku or client_name,
+                'Артикул Jakko': result.product_sku,
+                'Название Jakko': result.product_name,
+                'Кол-во': total_qty,
+                'Упаковка': pack_qty,
+                'Точность': f"{result.confidence:.0f}%",
+                'Метод': result.match_type,
+            })
+            matched += 1
+        else:
+            results.append({
+                'Запрос': client_sku or client_name,
+                'Артикул Jakko': '❌ НЕ НАЙДЕНО',
+                'Название Jakko': '',
+                'Кол-во': qty,
+                'Упаковка': 1,
+                'Точность': '0%',
+                'Метод': 'not_found',
+            })
+            not_found += 1
+
+    # Создаём Excel файл
+    df = pd.DataFrame(results)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"jakko_order_{timestamp}.xlsx"
+
+    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        tmp_path = tmp.name
+
+    # Сохраняем с форматированием
+    with pd.ExcelWriter(tmp_path, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Заказ')
+        worksheet = writer.sheets['Заказ']
+        # Ширина колонок
+        worksheet.column_dimensions['A'].width = 25
+        worksheet.column_dimensions['B'].width = 15
+        worksheet.column_dimensions['C'].width = 50
+        worksheet.column_dimensions['D'].width = 10
+        worksheet.column_dimensions['E'].width = 10
+        worksheet.column_dimensions['F'].width = 10
+        worksheet.column_dimensions['G'].width = 15
+
+    # Отправляем файл
+    await message.answer(
+        f"✅ <b>Результат обработки</b>\n\n"
+        f"<b>Найдено:</b> {matched} из {len(items)}\n"
+        f"<b>Не найдено:</b> {not_found}"
+    )
+
+    doc = FSInputFile(tmp_path, filename=filename)
+    await message.answer_document(doc, caption="📊 Результат matching в Excel")
+
+    # Удаляем временный файл
+    os.unlink(tmp_path)
 
 
 @router.message(F.document)
 async def handle_document(message: Message, bot: Bot):
-    """Обработка загруженного документа"""
+    """Обработка загруженного файла (Excel/CSV)"""
     document = message.document
+    filename = document.file_name.lower()
 
     # Проверяем тип файла
-    if not document.file_name.endswith(('.xlsx', '.xls')):
+    if not filename.endswith(('.xlsx', '.xls', '.csv')):
         await message.answer(
-            "⚠️ Поддерживаются только Excel файлы (.xlsx, .xls)\n\n"
-            "Отправьте файл заказа в формате Excel."
+            "⚠️ Поддерживаются файлы: Excel (.xlsx, .xls), CSV (.csv)\n\n"
+            "Или отправьте текстовый список артикулов (каждый с новой строки)."
         )
         return
 
     await message.answer("📥 Получил файл, обрабатываю...")
 
     try:
-        # Скачиваем файл
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        # Определяем расширение для временного файла
+        suffix = '.csv' if filename.endswith('.csv') else '.xlsx'
+
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             await bot.download(document, tmp.name)
             tmp_path = tmp.name
 
-        # Парсим Excel
-        df = pd.read_excel(tmp_path)
+        # Парсим файл
+        if filename.endswith('.csv'):
+            # Пробуем разные разделители
+            for sep in [';', ',', '\t']:
+                try:
+                    df = pd.read_csv(tmp_path, sep=sep)
+                    if len(df.columns) > 1:
+                        break
+                except:
+                    continue
+            else:
+                df = pd.read_csv(tmp_path)
+        else:
+            df = pd.read_excel(tmp_path)
 
-        # Ищем колонки с артикулом и названием
+        # Ищем колонки
         sku_col = None
         name_col = None
         qty_col = None
@@ -47,92 +163,90 @@ async def handle_document(message: Message, bot: Bot):
                 sku_col = col
             elif any(x in col_lower for x in ['название', 'наименование', 'name', 'товар']):
                 name_col = col
-            elif any(x in col_lower for x in ['количество', 'кол-во', 'qty', 'шт']):
+            elif any(x in col_lower for x in ['количество', 'кол-во', 'qty', 'шт', 'кол']):
                 qty_col = col
 
+        # Если не нашли колонки, берём первую как артикул
         if not sku_col and not name_col:
-            await message.answer(
-                "❌ Не удалось найти колонки с артикулом или названием.\n\n"
-                "Убедитесь, что в файле есть колонки:\n"
-                "• Артикул / SKU / Код\n"
-                "• Название / Наименование\n"
-                "• Количество (опционально)"
-            )
-            os.unlink(tmp_path)
-            return
+            if len(df.columns) >= 1:
+                sku_col = df.columns[0]
+            if len(df.columns) >= 2:
+                qty_col = df.columns[1]
 
-        await message.answer(f"📊 Найдено {len(df)} позиций. Запускаю matching...")
-
-        # Matching
-        from backend.services.matching import MatchingService
-        matcher = MatchingService()
-        client_id = str(message.from_user.id)
-
-        results = []
-        matched = 0
-        needs_review = 0
-        not_found = 0
-
+        # Собираем items
+        items = []
         for idx, row in df.iterrows():
-            client_sku = str(row.get(sku_col, '')) if sku_col else ''
-            client_name = str(row.get(name_col, '')) if name_col else ''
-            qty = row.get(qty_col, 1) if qty_col else 1
+            sku = str(row.get(sku_col, '')).strip() if sku_col else ''
+            name = str(row.get(name_col, '')).strip() if name_col else ''
 
-            result = matcher.match_item(
-                client_id=client_id,
-                client_sku=client_sku,
-                client_name=client_name
-            )
+            # Парсим количество
+            qty_raw = row.get(qty_col, 1) if qty_col else 1
+            try:
+                qty = int(float(qty_raw)) if pd.notna(qty_raw) else 1
+            except:
+                qty = 1
 
-            results.append({
-                'Артикул клиента': client_sku,
-                'Название клиента': client_name,
-                'Количество': qty,
-                'SKU Jakko': result.product_sku or '',
-                'Название Jakko': result.product_name or '',
-                'Confidence': result.confidence,
-                'Метод': result.match_type,
-                'Проверка': 'Да' if result.needs_review else 'Нет',
-                'Упаковка': result.pack_qty or 1,
-            })
+            if sku or name:
+                items.append({'sku': sku, 'name': name, 'qty': qty})
 
-            if result.match_type == 'not_found':
-                not_found += 1
-            elif result.needs_review:
-                needs_review += 1
-            else:
-                matched += 1
-
-        # Создаём результирующий файл
-        result_df = pd.DataFrame(results)
-        result_path = tmp_path.replace('.xlsx', '_result.xlsx')
-        result_df.to_excel(result_path, index=False)
-
-        # Отправляем результат
-        text = f"""
-✅ <b>Обработка завершена!</b>
-
-<b>Статистика:</b>
-• Всего позиций: {len(results)}
-• Точные совпадения: {matched}
-• Требуют проверки: {needs_review}
-• Не найдено: {not_found}
-
-<b>Точность:</b> {(matched / len(results) * 100):.1f}%
-"""
-
-        await message.answer(text)
-
-        # Отправляем файл
-        result_file = FSInputFile(result_path, filename=f"result_{document.file_name}")
-        await message.answer_document(
-            result_file,
-            caption="📎 Результат обработки заказа"
-        )
-
-        # Удаляем временные файлы
         os.unlink(tmp_path)
-        os.unlink(result_path)
+        await process_items(message, items)
 
     except Exception as e:
-        await message.answer(f"❌ Ошибка обработки: {e}")
+        await message.answer(f"❌ Ошибка обработки файла: {e}")
+
+
+@router.message(F.text)
+async def handle_text_list(message: Message):
+    """
+    Обработка текстового списка артикулов.
+    Формат: каждый артикул с новой строки, опционально количество через пробел/табуляцию.
+
+    Примеры:
+    202051110R
+    202051110R 5
+    Труба ПП 110-2000  10
+    """
+    text = message.text.strip()
+
+    # Игнорируем команды
+    if text.startswith('/'):
+        return
+
+    # Игнорируем короткие сообщения (меньше 3 символов)
+    if len(text) < 3:
+        return
+
+    lines = text.split('\n')
+
+    # Если только одна строка и она короткая - это может быть обычное сообщение
+    if len(lines) == 1 and len(text) < 10:
+        return
+
+    items = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Парсим: артикул/название [количество]
+        # Количество — последнее число в строке, отделённое пробелом
+        # Примеры:
+        #   "Хомут 110 80" → sku="Хомут 110", qty=80
+        #   "Труба ПП 110×3000 5" → sku="Труба ПП 110×3000", qty=5
+        #   "202051110R" → sku="202051110R", qty=1
+
+        # Ищем число в конце строки (отделённое пробелом)
+        match = re.match(r'^(.+?)\s+(\d+)\s*$', line)
+        if match:
+            sku = match.group(1).strip()
+            qty = int(match.group(2))
+        else:
+            sku = line
+            qty = 1
+
+        if sku:
+            items.append({'sku': sku, 'name': '', 'qty': qty})
+
+    if items:
+        await process_items(message, items)

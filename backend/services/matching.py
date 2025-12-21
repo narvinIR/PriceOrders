@@ -13,6 +13,184 @@ from backend.services.embeddings import get_embedding_matcher
 logger = logging.getLogger(__name__)
 
 
+def detect_client_category(client_name: str) -> str | None:
+    """
+    Определить категорию из запроса клиента.
+    Returns: 'prestige', 'outdoor', 'ppr', 'sewer', или None
+    """
+    name = client_name.lower()
+
+    is_sewer = any(x in name for x in ['кан', 'канализац', 'сантех'])
+
+    # Малошумная/Prestige = белая канализация (403)
+    if any(x in name for x in ['малошум', 'prestige']):
+        return 'prestige'
+    # Белая + канализация = тоже Prestige
+    if is_sewer and 'бел' in name:
+        return 'prestige'
+
+    # Наружная канализация = рыжая (303)
+    if any(x in name for x in ['нар кан', 'нар.кан', 'наружн', 'рыж']):
+        return 'outdoor'
+
+    # ППР (водопровод/отопление) - белый, но НЕ канализация
+    if any(x in name for x in ['ппр', 'ppr', 'водопровод', 'отоплен']):
+        return 'ppr'
+    if 'бел' in name and not is_sewer:
+        return 'ppr'
+
+    # Обычная серая канализация (202)
+    if is_sewer or 'сер' in name:
+        return 'sewer'
+
+    return None  # Не указано - дефолт: обычная серая кан.
+
+
+def extract_product_type(name: str) -> str | None:
+    """
+    Извлечь тип товара из названия.
+    Returns: 'труба', 'отвод', 'тройник', 'муфта', 'заглушка', 'переходник',
+             'ревизия', 'крестовина', 'патрубок', 'хомут', 'кран', 'фильтр',
+             'клапан', 'сифон' или None
+    """
+    name_lower = name.lower()
+
+    # Порядок важен - более специфичные первые
+    types = [
+        ('крестовин', 'крестовина'),
+        ('тройник', 'тройник'),
+        ('переход', 'переходник'),
+        ('отвод', 'отвод'),
+        ('колено', 'отвод'),
+        ('угол', 'отвод'),
+        ('муфт', 'муфта'),
+        ('заглуш', 'заглушка'),
+        ('ревизи', 'ревизия'),
+        ('патруб', 'патрубок'),
+        ('труб', 'труба'),
+        ('хомут', 'хомут'),
+        ('кран', 'кран'),
+        ('фильтр', 'фильтр'),
+        ('клапан', 'клапан'),
+        ('сифон', 'сифон'),
+    ]
+
+    for marker, ptype in types:
+        if marker in name_lower:
+            return ptype
+    return None
+
+
+def extract_angle(name: str) -> int | None:
+    """Извлечь угол из названия (45°, 67°, 87°, 90°)"""
+    m = re.search(r'\b(45|67|87|90)\s*[°градус]?', name.lower())
+    if m:
+        return int(m.group(1))
+    # Альтернативный формат: /45, /90
+    m = re.search(r'/\s*(45|67|87|90)\b', name.lower())
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def filter_by_category(matches: list, client_cat: str | None) -> list:
+    """
+    Фильтрует список совпадений по категории.
+    matches: список (product, score) или просто product dicts
+    """
+    if not matches or len(matches) <= 1:
+        return matches
+
+    # Определяем формат: (product, score) или просто product
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    filtered = None
+    if client_cat == 'prestige':
+        filtered = [m for m in matches
+                    if 'малошум' in get_product(m).get('category', '').lower()
+                    or 'prestige' in get_product(m)['name'].lower()]
+    elif client_cat == 'outdoor':
+        filtered = [m for m in matches
+                    if 'наружн' in get_product(m).get('category', '').lower()
+                    or 'нар.кан' in get_product(m)['name'].lower()]
+    elif client_cat == 'ppr':
+        filtered = [m for m in matches
+                    if 'ппр' in get_product(m).get('category', '').lower()
+                    or 'ппр' in get_product(m)['name'].lower()]
+    else:
+        # Дефолт: обычная СЕРАЯ канализация (202) - исключаем Prestige и наружную
+        filtered = [m for m in matches
+                    if ('канализац' in get_product(m).get('category', '').lower()
+                        and 'малошум' not in get_product(m).get('category', '').lower()
+                        and 'наружн' not in get_product(m).get('category', '').lower())
+                    or 'серый' in get_product(m)['name'].lower()]
+
+    return filtered if filtered else matches
+
+
+def filter_by_product_type(matches: list, client_type: str | None) -> list:
+    """Фильтрует по типу товара (отвод, муфта, заглушка и т.д.)"""
+    if not matches or not client_type or len(matches) <= 1:
+        return matches
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    filtered = [m for m in matches
+                if extract_product_type(get_product(m)['name']) == client_type]
+
+    return filtered if filtered else matches
+
+
+def filter_by_angle(matches: list, client_angle: int | None) -> list:
+    """Фильтрует по углу (45°, 87°, 90°)"""
+    if not matches or not client_angle or len(matches) <= 1:
+        return matches
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    filtered = [m for m in matches
+                if extract_angle(get_product(m)['name']) == client_angle]
+
+    return filtered if filtered else matches
+
+
+def extract_thread_type(name: str) -> str | None:
+    """Извлечь тип резьбы: 'вн' (внутренняя) или 'нар' (наружная)"""
+    name_lower = name.lower()
+    # Паттерны: в/р, вн.рез, вн. рез, внутр
+    if any(x in name_lower for x in ['в/р', 'вн.рез', 'вн. рез', 'вн рез', 'внутр']):
+        return 'вн'
+    # Паттерны: н/р, нар.рез, нар. рез, наруж
+    if any(x in name_lower for x in ['н/р', 'нар.рез', 'нар. рез', 'нар рез', 'наруж']):
+        return 'нар'
+    return None
+
+
+def filter_by_thread(matches: list, client_thread: str | None) -> list:
+    """Фильтрует по типу резьбы (внутренняя/наружная)"""
+    if not matches or not client_thread or len(matches) <= 1:
+        return matches
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    filtered = [m for m in matches
+                if extract_thread_type(get_product(m)['name']) == client_thread]
+
+    return filtered if filtered else matches
+
+
 def is_eco_product(name: str) -> bool:
     """
     Проверка является ли товар ЭКО (эконом) версией.
@@ -31,8 +209,17 @@ def is_eco_product(name: str) -> bool:
 
 def extract_mm_from_clamp(client_name: str) -> int | None:
     """Извлечь размер в мм из запроса хомута"""
-    m = re.search(r'\bхомут\s+(\d+)\b', client_name.lower())
-    return int(m.group(1)) if m else None
+    name = client_name.lower()
+    if 'хомут' not in name:
+        return None
+    # Паттерны: "хомут 110", "хомут в комплекте 110"
+    m = re.search(r'\bхомут\s+(?:в\s+комплекте\s+)?(\d+)\b', name)
+    if m:
+        mm = int(m.group(1))
+        # Валидация: размеры хомутов 15-200мм
+        if 15 <= mm <= 200:
+            return mm
+    return None
 
 
 def clamp_fits_mm(product_name: str, target_mm: int) -> bool:
@@ -78,8 +265,10 @@ class MatchingService:
                     pass  # ML не обязателен, продолжаем без него
         return self._products_cache
 
-    def _load_client_mappings(self, client_id: UUID) -> dict:
+    def _load_client_mappings(self, client_id: UUID | None) -> dict:
         """Загрузка маппингов клиента"""
+        if client_id is None:
+            return {}  # Без client_id возвращаем пустой словарь
         client_key = str(client_id)
         if client_key not in self._mappings_cache:
             response = self.db.table('mappings')\
@@ -137,7 +326,7 @@ class MatchingService:
             logger.warning(f"Not found: {match.match_type}")
         return match
 
-    def match_item(self, client_id: UUID, client_sku: str, client_name: str = None) -> MatchResult:
+    def match_item(self, client_id: UUID | None, client_sku: str, client_name: str = None) -> MatchResult:
         """
         7-уровневый алгоритм маппинга:
         1. Точное совпадение артикула → 100%
@@ -167,7 +356,8 @@ class MatchingService:
                     product_name=product['name'],
                     confidence=settings.confidence_exact_sku,
                     match_type="cached_mapping",
-                    needs_review=False
+                    needs_review=False,
+                    pack_qty=product.get('pack_qty', 1)
                 ))
 
         # Level 1: Точное совпадение артикула
@@ -179,7 +369,8 @@ class MatchingService:
                     product_name=product['name'],
                     confidence=settings.confidence_exact_sku,
                     match_type="exact_sku",
-                    needs_review=False
+                    needs_review=False,
+                    pack_qty=product.get('pack_qty', 1)
                 ))
 
         # Level 2: Точное совпадение названия
@@ -192,7 +383,8 @@ class MatchingService:
                         product_name=product['name'],
                         confidence=settings.confidence_exact_name,
                         match_type="exact_name",
-                        needs_review=False
+                        needs_review=False,
+                        pack_qty=product.get('pack_qty', 1)
                     ))
 
         # Level 4: Fuzzy SKU (Levenshtein distance ≤ 1)
@@ -212,13 +404,19 @@ class MatchingService:
                 product_name=best_sku_match['name'],
                 confidence=settings.confidence_fuzzy_sku * (best_sku_ratio / 100),
                 match_type="fuzzy_sku",
-                needs_review=best_sku_ratio < 95
+                needs_review=best_sku_ratio < 95,
+                pack_qty=best_sku_match.get('pack_qty', 1)
             ))
 
         # Level 5: Fuzzy название
         if norm_name:
-            # Извлекаем размеры из клиентского запроса
+            # Извлекаем параметры из клиентского запроса
             client_size = extract_pipe_size(client_name or "")
+            client_cat = detect_client_category(client_name or "")
+            client_type = extract_product_type(client_name or "")
+            client_angle = extract_angle(client_name or "")
+            clamp_mm = extract_mm_from_clamp(client_name or "")
+            client_wants_eco = is_eco_product(client_name or "")
 
             # Собираем все совпадения выше порога
             matches = []
@@ -227,10 +425,9 @@ class MatchingService:
                 if client_size:
                     product_size = extract_pipe_size(product['name'])
                     if product_size and product_size != client_size:
-                        continue  # Пропускаем товар с другим размером
+                        continue
 
                 prod_norm_name = normalize_name(product['name'])
-                # Используем max из token_sort и token_set для лучшего покрытия
                 ratio = max(
                     fuzz.token_sort_ratio(norm_name, prod_norm_name),
                     fuzz.token_set_ratio(norm_name, prod_norm_name)
@@ -239,23 +436,42 @@ class MatchingService:
                     matches.append((product, ratio))
 
             if matches:
-                # Сортируем по ratio (убывание)
+                # ВАЖНО: Сначала применяем критические фильтры ко ВСЕМ matches,
+                # потом выбираем лучших. Иначе неправильный тип может иметь
+                # более высокий score и вытеснить правильный.
+                client_thread = extract_thread_type(client_name or "")
+
+                # Фильтр по типу товара - применяем ко всем
+                if client_type:
+                    type_filtered = [m for m in matches
+                                     if extract_product_type(m[0]['name']) == client_type]
+                    if type_filtered:
+                        matches = type_filtered
+
+                # Фильтр по углу - применяем ко всем
+                if client_angle:
+                    angle_filtered = [m for m in matches
+                                      if extract_angle(m[0]['name']) == client_angle]
+                    if angle_filtered:
+                        matches = angle_filtered
+
+                # Теперь сортируем и берём top
                 matches.sort(key=lambda x: x[1], reverse=True)
                 best_ratio = matches[0][1]
-
-                # Фильтруем только лучшие (с отклонением <=2%)
                 top_matches = [m for m in matches if m[1] >= best_ratio - 2]
 
-                # Для хомутов - фильтруем по диапазону мм
-                clamp_mm = extract_mm_from_clamp(client_name or "")
+                # Применяем оставшиеся фильтры
+                top_matches = filter_by_thread(top_matches, client_thread)
+                top_matches = filter_by_category(top_matches, client_cat)
+
+                # Хомуты - фильтруем по диапазону мм
                 if clamp_mm and len(top_matches) > 1:
                     fitting = [m for m in top_matches
                                if clamp_fits_mm(m[0]['name'], clamp_mm)]
                     if fitting:
                         top_matches = fitting
 
-                # Если клиент НЕ указал ЭКО - предпочитаем стандарт
-                client_wants_eco = is_eco_product(client_name or "")
+                # Если НЕ ЭКО - предпочитаем стандарт
                 if not client_wants_eco and len(top_matches) > 1:
                     non_eco = [m for m in top_matches
                                if not is_eco_product(m[0]['name'])]
@@ -264,9 +480,8 @@ class MatchingService:
 
                 best_match, best_ratio = top_matches[0]
                 conf = settings.confidence_fuzzy_name * (best_ratio / 100)
-                # Повышаем confidence если выбрали правильный вариант
                 if len(matches) > 1 and not client_wants_eco:
-                    conf = min(conf + 5, 95.0)  # Бонус за выбор стандарта
+                    conf = min(conf + 5, 95.0)
 
                 return self._finalize_match(MatchResult(
                     product_id=UUID(best_match['id']),
@@ -274,24 +489,39 @@ class MatchingService:
                     product_name=best_match['name'],
                     confidence=conf,
                     match_type="fuzzy_name",
-                    needs_review=conf < settings.min_confidence_auto
+                    needs_review=conf < settings.min_confidence_auto,
+                    pack_qty=best_match.get('pack_qty', 1)
                 ))
 
-        # Level 7: Semantic embedding search (ML)
+        # Level 7: Semantic embedding search (ML) с фильтрами
         if self._embedding_matcher.is_ready and client_name:
-            result = self._embedding_matcher.get_best_match(client_name, min_score=0.6)
-            if result:
-                product, score = result
-                # Конвертируем score (0-1) в confidence (0-100)
-                conf = score * 100 * 0.75  # max 75% для ML (требует проверки)
-                return self._finalize_match(MatchResult(
-                    product_id=UUID(product['id']),
-                    product_sku=product['sku'],
-                    product_name=product['name'],
-                    confidence=conf,
-                    match_type="semantic_embedding",
-                    needs_review=True  # ML всегда требует проверки
-                ))
+            # Получаем топ-20 кандидатов для фильтрации (больше для лучшего отбора)
+            results = self._embedding_matcher.search(client_name, top_k=20, min_score=0.4)
+            if results:
+                # Извлекаем параметры клиента
+                client_cat = detect_client_category(client_name)
+                client_type = extract_product_type(client_name)
+                client_angle = extract_angle(client_name)
+                client_thread = extract_thread_type(client_name)
+
+                # Применяем те же фильтры что и для fuzzy
+                filtered = filter_by_product_type(results, client_type)
+                filtered = filter_by_angle(filtered, client_angle)
+                filtered = filter_by_thread(filtered, client_thread)
+                filtered = filter_by_category(filtered, client_cat)
+
+                if filtered:
+                    product, score = filtered[0]
+                    conf = score * 100 * 0.75  # max 75% для ML
+                    return self._finalize_match(MatchResult(
+                        product_id=UUID(product['id']),
+                        product_sku=product['sku'],
+                        product_name=product['name'],
+                        confidence=conf,
+                        match_type="semantic_embedding",
+                        needs_review=True,
+                        pack_qty=product.get('pack_qty', 1)
+                    ))
 
         # Level 8: Не найдено - требует ручной проверки
         return self._finalize_match(MatchResult(

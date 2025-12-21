@@ -116,15 +116,18 @@ def normalize_name(name: str) -> str:
         inch = PIPE_MM_TO_INCH.get(mm, f'{mm}')
         return f'хомут в комплекте {inch}'
     result = re.sub(r'\bхомут\s+(\d+)\b', convert_clamp_mm_to_inch, result)
-    # Убираем цвет "серый" (по умолчанию)
+    # Убираем цвет - не важен для сопоставления
     result = re.sub(r'\bсерый\b', '', result)
+    result = re.sub(r'\bбелый\b', '', result)
     # Нормализуем размеры труб: 110-2000, 110х50, 110*50, 110×50 → 110×50
     # Сначала унифицируем разделители (-, x, х, X, Х, *, ×) → ×
     result = re.sub(r'(\d+)\s*[-xхXХ*×]\s*(\d+)', r'\1×\2', result)
-    # Убираем Jk/Jakko/Prestige - весь каталог Jakko, не нужно для сравнения
+    # Убираем Jk/Jakko - весь каталог Jakko, не нужно для сравнения
+    # НО оставляем Prestige - это линейка малошумной канализации!
     result = re.sub(r'\bjk\b', '', result)
     result = re.sub(r'\bjakko\b', '', result)
-    result = re.sub(r'\bprestige\b', '', result)
+    # Унифицируем: малошумн* → prestige (для matching)
+    result = re.sub(r'\bмалошумн\w*\b', 'prestige', result)
     # Нормализуем PN (давление): PN 10, PN-10, PN10 → pn10
     result = re.sub(r'\bpn\s*[-]?\s*(\d+)', r'pn\1', result)
     # Убираем лишние пробелы
