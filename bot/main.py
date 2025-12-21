@@ -14,8 +14,6 @@ from aiogram.types import BotCommand
 from fastapi import FastAPI
 import uvicorn
 
-sys.path.insert(0, '/home/dimas/projects/PriceOrders')
-
 from bot.config import (
     BOT_TOKEN, WEBHOOK_MODE, WEBHOOK_URL, WEBHOOK_PATH, HOST, PORT
 )

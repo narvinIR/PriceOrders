@@ -13,6 +13,18 @@ import pandas as pd
 
 router = Router()
 
+# Singleton для MatchingService - ML модель загружается ОДИН раз
+_matcher = None
+
+
+def get_matcher():
+    """Ленивая инициализация MatchingService"""
+    global _matcher
+    if _matcher is None:
+        from backend.services.matching import MatchingService
+        _matcher = MatchingService()
+    return _matcher
+
 
 async def process_items(message: Message, items: list):
     """
@@ -28,8 +40,7 @@ async def process_items(message: Message, items: list):
 
     await message.answer(f"📊 Найдено {len(items)} позиций. Запускаю matching...")
 
-    from backend.services.matching import MatchingService
-    matcher = MatchingService()
+    matcher = get_matcher()
     client_id = None
 
     results = []

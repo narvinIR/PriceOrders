@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from uuid import uuid4
 
 from bot.keyboards.inline import get_match_keyboard
+from bot.handlers.upload import get_matcher
 
 router = Router()
 
@@ -31,9 +32,7 @@ async def cmd_search(message: Message):
     await message.answer(f"🔍 Ищу: <b>{query}</b>...")
 
     try:
-        from backend.services.matching import MatchingService
-
-        matcher = MatchingService()
+        matcher = get_matcher()
         # Используем client_id = telegram_id для кэширования
         client_id = str(message.from_user.id)
 

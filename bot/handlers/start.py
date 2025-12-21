@@ -64,8 +64,8 @@ async def cmd_stats(message: Message):
         return
 
     try:
-        from backend.services.matching import MatchingService
-        matcher = MatchingService()
+        from bot.handlers.upload import get_matcher
+        matcher = get_matcher()
         stats = matcher.get_stats()
 
         text = f"""
