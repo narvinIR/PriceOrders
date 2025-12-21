@@ -5,11 +5,14 @@
 """
 import os
 import re
+import logging
 import tempfile
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import Message, FSInputFile
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -21,8 +24,10 @@ def get_matcher():
     """Ленивая инициализация MatchingService"""
     global _matcher
     if _matcher is None:
+        logger.info("🔧 Инициализация MatchingService...")
         from backend.services.matching import MatchingService
         _matcher = MatchingService()
+        logger.info("✅ MatchingService готов")
     return _matcher
 
 
@@ -38,9 +43,12 @@ async def process_items(message: Message, items: list):
         await message.answer("❌ Не найдено позиций для обработки")
         return
 
+    logger.info(f"⚙️ process_items: {len(items)} позиций")
     await message.answer(f"📊 Найдено {len(items)} позиций. Запускаю matching...")
 
+    logger.info("⏳ Инициализация matcher...")
     matcher = get_matcher()
+    logger.info("✅ Matcher готов, начинаю matching...")
     client_id = None
 
     results = []
@@ -88,6 +96,8 @@ async def process_items(message: Message, items: list):
             })
             not_found += 1
 
+    logger.info(f"✅ Matching завершён: {matched} найдено, {not_found} не найдено")
+
     # Создаём Excel файл
     df = pd.DataFrame(results)
 
@@ -111,6 +121,7 @@ async def process_items(message: Message, items: list):
         worksheet.column_dimensions['G'].width = 15
 
     # Отправляем файл
+    logger.info("📤 Отправляю результат...")
     await message.answer(
         f"✅ <b>Результат обработки</b>\n\n"
         f"<b>Найдено:</b> {matched} из {len(items)}\n"
@@ -119,6 +130,7 @@ async def process_items(message: Message, items: list):
 
     doc = FSInputFile(tmp_path, filename=filename)
     await message.answer_document(doc, caption="📊 Результат matching в Excel")
+    logger.info("✅ Файл отправлен!")
 
     # Удаляем временный файл
     os.unlink(tmp_path)
@@ -260,4 +272,9 @@ async def handle_text_list(message: Message):
             items.append({'sku': sku, 'name': '', 'qty': qty})
 
     if items:
-        await process_items(message, items)
+        logger.info(f"📝 Получено {len(items)} позиций от user {message.from_user.id}")
+        try:
+            await process_items(message, items)
+        except Exception as e:
+            logger.error(f"❌ Ошибка process_items: {e}", exc_info=True)
+            await message.answer(f"❌ Ошибка обработки: {e}")
