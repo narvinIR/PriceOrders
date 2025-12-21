@@ -2,7 +2,6 @@
 Telegram бот PriceOrders - сопоставление артикулов B2B.
 Паттерны из VlessReality: lifecycle hooks, bot commands.
 """
-import sys
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -67,19 +66,38 @@ dp.startup.register(on_startup)
 dp.shutdown.register(on_shutdown)
 
 
+def _warmup_matcher():
+    """Синхронный прогрев для запуска в потоке (не блокирует event loop)"""
+    import time
+    from bot.handlers.upload import get_matcher
+
+    start = time.time()
+    logger.info("⏳ Загрузка MatchingService...")
+    matcher = get_matcher()
+    logger.info(f"✅ MatchingService создан за {time.time()-start:.1f}s")
+
+    start = time.time()
+    logger.info("⏳ Прогрев match_item (загрузка ML модели)...")
+    matcher.match_item(None, "test", "test")
+    logger.info(f"✅ match_item готов за {time.time()-start:.1f}s")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle для FastAPI"""
     # Прогрев ML модели ДО приёма запросов (иначе webhook таймаутит)
     logger.info("🔥 Прогрев MatchingService...")
     try:
-        from bot.handlers.upload import get_matcher
-        matcher = get_matcher()
-        # Тестовый запрос для полной инициализации
-        matcher.match_item(None, "test", "test")
-        logger.info("✅ MatchingService готов")
+        # Прогрев в отдельном потоке (не блокирует event loop)
+        await asyncio.wait_for(
+            asyncio.to_thread(_warmup_matcher),
+            timeout=120.0  # 2 минуты на прогрев
+        )
+        logger.info("✅ MatchingService полностью готов")
+    except asyncio.TimeoutError:
+        logger.error("❌ Таймаут прогрева ML модели (120 сек)")
     except Exception as e:
-        logger.error(f"❌ Ошибка прогрева: {e}")
+        logger.error(f"❌ Ошибка прогрева: {e}", exc_info=True)
 
     if WEBHOOK_MODE:
         webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
