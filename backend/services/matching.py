@@ -122,6 +122,13 @@ def filter_by_category(matches: list, client_cat: str | None) -> list:
                     or 'ппр' in get_product(m)['name'].lower()]
     else:
         # Дефолт: обычная СЕРАЯ канализация (202) - исключаем Prestige и наружную
+        # Приоритет 1: SKU начинается с 202 (серая канализация)
+        sku_202 = [m for m in matches
+                   if get_product(m).get('sku', '').startswith('202')]
+        if sku_202:
+            return sku_202
+
+        # Приоритет 2: Категория "канализация" (не малошум/наружная) или "серый" в названии
         filtered = [m for m in matches
                     if ('канализац' in get_product(m).get('category', '').lower()
                         and 'малошум' not in get_product(m).get('category', '').lower()
@@ -495,6 +502,14 @@ class MatchingService:
                     if angle_filtered:
                         matches = angle_filtered
 
+                # Фильтр по категории - применяем ко ВСЕМ matches (критично для муфт)
+                # Иначе 604 (рифленые) могут иметь выше score чем 202 (канализация)
+                # Если категория не указана - по умолчанию 'sewer' (серая канализация)
+                effective_cat = client_cat or 'sewer'
+                cat_filtered = filter_by_category(matches, effective_cat)
+                if cat_filtered:
+                    matches = cat_filtered
+
                 # Теперь сортируем и берём top
                 matches.sort(key=lambda x: x[1], reverse=True)
                 best_ratio = matches[0][1]
@@ -502,7 +517,6 @@ class MatchingService:
 
                 # Применяем оставшиеся фильтры
                 top_matches = filter_by_thread(top_matches, client_thread)
-                top_matches = filter_by_category(top_matches, client_cat)
 
                 # Фильтр по размерам фитингов (110/50 vs 110/110)
                 top_matches = filter_by_fitting_size(top_matches, client_fitting_size)

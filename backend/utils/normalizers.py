@@ -205,12 +205,15 @@ def extract_fitting_size(name: str) -> tuple[int, ...] | None:
         if all(25 <= s <= 200 for s in sizes):
             return tuple(sizes)
 
-    # Одиночный размер (Муфта 32, Заглушка 110)
-    # Ищем число 32-160 после типа товара
-    m = re.search(r'\b(муфт|заглуш|ревизи|крестовин|тройник|переход|отвод)\w*\s+(?:\w+\s+)*?(\d{2,3})\b', clean_name.lower())
-    if m:
-        size = int(m.group(2))
-        if 25 <= size <= 200:
-            return (size,)
+    # Одиночный размер (Муфта 32, Заглушка 110, Сифон 50)
+    # Ищем число 25-200 в любом месте названия после типа товара
+    # Паттерн: тип товара ... число (через любые слова)
+    name_lower = clean_name.lower()
+    types_pattern = r'(муфт|заглуш|ревизи|крестовин|тройник|переход|отвод|сифон)'
+    if re.search(types_pattern, name_lower):
+        # Ищем все числа 25-200 в названии
+        numbers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', name_lower) if 25 <= int(n) <= 200]
+        if numbers:
+            return (numbers[0],)  # Берём первое подходящее число
 
     return None

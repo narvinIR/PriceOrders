@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     supabase_service_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
     # Matching settings
-    fuzzy_threshold: int = 75
+    fuzzy_threshold: int = 70  # Понижен с 75 для better recall (муфты 202 имеют score 73)
     confidence_exact_sku: float = 100.0
     confidence_exact_name: float = 95.0
     confidence_fuzzy_sku: float = 90.0
