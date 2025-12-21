@@ -35,31 +35,42 @@ backend/
     └── normalizers.py   # Нормализация SKU и названий
 
 tests/
-├── conftest.py          # Pytest fixtures
-├── test_normalizers.py  # 47 unit тестов
-├── test_matching_unit.py # 18 unit тестов
-└── test_matching_full.py # 263 интеграционных теста
+├── conftest.py              # Pytest fixtures
+├── test_normalizers.py      # unit тесты нормализации
+├── test_matching_unit.py    # unit тесты matching
+├── test_bot_matching.py     # тесты бота
+├── test_category_preference.py # тесты категорий
+└── test_e2e_matching.py     # 51 E2E тест (парсинг + matching)
 ```
 
 ## Ключевые концепции
 
-### 7-уровневый алгоритм matching
+### 7-уровневый алгоритм matching (v3.0)
 
 1. **Точное SKU** (100%) - прямое совпадение артикула
 2. **Точное название** (95%) - полное совпадение после нормализации
 3. **Кэшированный маппинг** (100%) - сохранённые подтверждённые связи
 4. **Fuzzy SKU** (90%) - Levenshtein distance ≤ 1
-5. **Fuzzy название** (80%) - token_sort_ratio + token_set_ratio + точный размер
-6. **Semantic embedding** (≤75%) - ML поиск через FAISS
+5. **Fuzzy название** (80%) - с фильтрами по типу, углу, категории
+6. **Semantic embedding** (≤75%) - ML поиск через FAISS + фильтры
 7. **Не найдено** (0%) - требует ручной проверки
+
+### Фильтры matching (v3.0)
+
+Применяются ДО выбора лучшего совпадения:
+- **extract_product_type** - тип: труба, отвод, тройник, муфта, заглушка...
+- **extract_angle** - угол: 45°, 67°, 87°, 90°
+- **extract_thread_type** - резьба: вн (в/р), нар (н/р)
+- **detect_client_category** - категория: sewer, prestige, outdoor, ppr
+- **clamp_fits_mm** - размер хомута по диапазону мм
 
 ### Нормализация названий
 
 Удаляется:
 - Упаковка: `(уп 20 шт)`, `(20 шт)`
 - Толщина: `(2.7)`, `(2.2)`
-- Бренд: `Jk`, `Jakko`, `Prestige`
-- Цвет: `серый`
+- Бренд: `Jk`, `Jakko` (НО НЕ Prestige!)
+- Цвет: `серый`, `белый`
 
 Конвертируется:
 - `переход` → `переходник`
@@ -70,6 +81,7 @@ tests/
 - `нар.рез/н/р` → `наружная резьба`
 - `хомут 110` → `хомут в комплекте 4"` (мм → дюймы)
 - `PN 20/PN-20/PN20` → `pn20`
+- `малошумн*` → `prestige` (линейка малошумной канализации)
 
 ### Точный matching размеров
 
@@ -142,9 +154,18 @@ PYTHONPATH=. python tests/test_matching_full.py
 
 Контекст проекта сохранён в MCP memory:
 - `PriceOrders_MVP_Complete` - статус реализации
-- `PriceOrders_Matching_Algorithm` - алгоритм matching (v2.0)
+- `PriceOrders_Matching_Algorithm` - алгоритм matching (v3.0)
 - `PriceOrders_Normalizers` - правила нормализации
 - `PriceOrders_PackQty` - логика упаковок
 - `PriceOrders_Config` - настройки порогов
-- `PriceOrders_Tests` - тестирование (328 тестов)
+- `PriceOrders_Tests` - тестирование (121 тест, все проходят)
 - `PriceOrders_Analytics_API` - API статистики
+
+## Telegram Bot
+
+Бот для B2B клиентов:
+- Отправь список артикулов → получи Excel с результатом
+- Формат: `название количество` (каждый с новой строки)
+- Пример: `Труба ПП 110×3000 серая 5`
+
+Запуск: `PYTHONPATH=. python3 bot/main.py`
