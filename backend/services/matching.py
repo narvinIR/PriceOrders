@@ -303,12 +303,16 @@ class MatchingService:
         if self._products_cache is None:
             response = self.db.table('products').select('*').execute()
             self._products_cache = response.data or []
-            # Строим embedding индекс для семантического поиска
-            if self._products_cache and not self._embedding_matcher.is_ready:
-                try:
-                    self._embedding_matcher.build_index(self._products_cache)
-                except Exception:
-                    pass  # ML не обязателен, продолжаем без него
+            # Строим embedding индекс для семантического поиска (если включен)
+            # ENABLE_ML_MATCHING=false по умолчанию (экономит ~500 МБ RAM)
+            if settings.enable_ml_matching:
+                if self._products_cache and not self._embedding_matcher.is_ready:
+                    try:
+                        logger.info("🔧 Загрузка ML модели для semantic matching...")
+                        self._embedding_matcher.build_index(self._products_cache)
+                        logger.info("✅ ML модель загружена")
+                    except Exception as e:
+                        logger.warning(f"⚠️ ML matching недоступен: {e}")
         return self._products_cache
 
     def _load_client_mappings(self, client_id: UUID | None) -> dict:
