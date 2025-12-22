@@ -30,6 +30,7 @@ PRODUCT_SYNONYMS = {
     'cap': 'заглушка',
     'plug': 'заглушка',
     # Канализация
+    'канализ': 'канализационн',
     'кан': 'канализационн',
     'нар кан': 'наружная канализация',
     'нар.кан': 'наружная канализация',
@@ -54,6 +55,8 @@ PRODUCT_SYNONYMS = {
     # Резьбовые муфты (американки)
     'американка': 'разъемная',  # муфта американка = муфта разъемная
     'разъемн': 'разъемная',  # муфта разъемн. = муфта разъемная
+    # Крепёж канализации - простой случай (слова рядом)
+    'хомут с защелк': 'клипсы',  # хомут с защёлкой = клипсы кан.
 }
 
 # Таблица соответствия диаметров труб (мм) размерам хомутов (дюймы)
@@ -109,12 +112,23 @@ def normalize_name(name: str) -> str:
     result = result.replace('ё', 'е')
     # Расширяем синонимы материалов и типов
     result = expand_synonyms(result)
+    # Хомут с защёлкой (размер может быть между словами) → клипсы
+    # "хомут d50мм с защелк" → "клипсы 50"
+    # "хомут 110 с защелк" → "клипсы 110"
+    def convert_clamp_to_clip(m):
+        size = m.group(1) or ''
+        # Извлекаем только число из размера (d50мм → 50)
+        size_num = re.search(r'(\d+)', size)
+        if size_num:
+            return f'клипсы {size_num.group(1)}'
+        return 'клипсы'
+    result = re.sub(r'\bхомут\s+([d\d]+\s*мм?|\d+)?\s*с\s+защелк\w*', convert_clamp_to_clip, result)
     # Убираем информацию об упаковке штук (уп 20 шт), (20 шт)
     # НО сохраняем метраж (50 м), (100 м) - это разные товары!
     result = re.sub(r'\(уп\.?\s*\d+\s*шт\.?\)', '', result)
     result = re.sub(r'\(\d+\s*шт\)', '', result)
-    # Убираем толщину в скобках (2.7), (2.2)
-    result = re.sub(r'\(\d+\.\d+\)', '', result)
+    # Убираем толщину в скобках (2.7), (2.2), (1,8)
+    result = re.sub(r'\(\d+[.,]\d+\)', '', result)
     # Убираем типы муфт/переходов для базового сопоставления
     result = re.sub(r'\(двухраструбная\)', '', result)
     # НО сохраняем "ремонтная" - это разные товары!
@@ -134,6 +148,12 @@ def normalize_name(name: str) -> str:
     # Убираем цвет - не важен для сопоставления
     result = re.sub(r'\bсерый\b', '', result)
     result = re.sub(r'\bбелый\b', '', result)
+    # Формат СТ: "d40 L250мм" или "d50 (1,8) L150мм" → "40×250"
+    def convert_st_pipe_format(m):
+        diameter = m.group(1)
+        length = m.group(2)
+        return f'{diameter}×{length}'
+    result = re.sub(r'd(\d+)[^lL]*l(\d+)\s*мм?', convert_st_pipe_format, result)
     # Нормализуем размеры труб: 110-2000, 110х50, 110*50, 110×50 → 110×50
     # Сначала унифицируем разделители (-, x, х, X, Х, *, ×) → ×
     result = re.sub(r'(\d+)\s*[-xхXХ*×]\s*(\d+)', r'\1×\2', result)
@@ -141,6 +161,10 @@ def normalize_name(name: str) -> str:
     # НО оставляем Prestige - это линейка малошумной канализации!
     result = re.sub(r'\bjk\b', '', result)
     result = re.sub(r'\bjakko\b', '', result)
+    # Убираем префиксы клиента СТ: "СТкв", "СТкн", "СТ ПП"
+    result = re.sub(r'\bсткв\b', '', result)  # СТ канализация внутренняя
+    result = re.sub(r'\bсткн\b', '', result)  # СТ канализация наружная
+    result = re.sub(r'\bст\s+пп\b', '', result)  # СТ полипропилен
     # Унифицируем: малошумн* → prestige (для matching)
     result = re.sub(r'\bмалошумн\w*\b', 'prestige', result)
     # Нормализуем PN (давление): PN 10, PN-10, PN10 → pn10
@@ -177,17 +201,27 @@ def extract_pipe_size(name: str) -> tuple[int, int] | None:
         "Труба ПП 110×2000" → (110, 2000)
         "Труба 50x1500" → (50, 1500)
         "Труба 32-500" → (32, 500)
+        "труба d40 L250мм" → (40, 250)
     """
     if not name:
         return None
-    # Ищем паттерн: число × число (с разными разделителями)
+
+    # Паттерн 1: стандартный формат "110×2000", "50x1500", "32-500"
     m = re.search(r'(\d+)\s*[×xхXХ*\-]\s*(\d+)', name)
     if m:
         diameter = int(m.group(1))
         length = int(m.group(2))
-        # Валидация: диаметр 16-400мм, длина 100-6000мм
         if 16 <= diameter <= 400 and 100 <= length <= 6000:
             return (diameter, length)
+
+    # Паттерн 2: формат СТ "d40 L250мм" или "d50 (1,8) L150мм"
+    m = re.search(r'd(\d+).*?L(\d+)', name, re.IGNORECASE)
+    if m:
+        diameter = int(m.group(1))
+        length = int(m.group(2))
+        if 16 <= diameter <= 400 and 100 <= length <= 6000:
+            return (diameter, length)
+
     return None
 
 

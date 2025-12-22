@@ -659,6 +659,16 @@ class MatchingService:
                     None
                 )
                 if product:
+                    # Post-validation: проверяем размер трубы
+                    client_size = extract_pipe_size(client_name)
+                    if client_size:
+                        product_size = extract_pipe_size(product['name'])
+                        if product_size and product_size != client_size:
+                            # Размеры не совпадают - ищем правильный товар
+                            logger.debug(f"LLM size mismatch: {client_size} vs {product_size}")
+                            product = None  # Отклоняем LLM результат
+
+                if product:
                     conf = float(result.get("confidence", 70))
                     return self._finalize_match(MatchResult(
                         product_id=UUID(product['id']),
