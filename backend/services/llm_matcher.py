@@ -97,7 +97,7 @@ def _get_system_prompt() -> str:
 class LLMMatcher:
     """Matching товаров через LLM API (OpenRouter)"""
 
-    def __init__(self, api_key: str, model: str = "x-ai/grok-4.1-fast"):
+    def __init__(self, api_key: str, model: str = "moonshotai/kimi-k2-thinking"):
         self.api_key = api_key
         self.model = model
         self.products_cache: Optional[str] = None
@@ -167,7 +167,9 @@ class LLMMatcher:
                 return None
 
             data = response.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            # Kimi K2 Thinking возвращает ответ в reasoning, другие модели в content
+            message = data.get("choices", [{}])[0].get("message", {})
+            content = message.get("content", "") or message.get("reasoning", "")
 
             # Парсим JSON из ответа
             # Убираем возможные markdown блоки

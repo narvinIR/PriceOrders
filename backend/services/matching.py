@@ -643,6 +643,20 @@ class MatchingService:
                 if cat_filtered:
                     matches = cat_filtered
 
+                # КРИТИЧНО: фильтры по разъемным/переходникам ДО сортировки
+                # Иначе короткие названия (муфта 20) получают выше score чем длинные
+                if client_is_detachable:
+                    det_filtered = [m for m in matches
+                                    if is_coupling_detachable(m[0]['name'])]
+                    if det_filtered:
+                        matches = det_filtered
+
+                if client_is_reducer:
+                    red_filtered = [m for m in matches
+                                    if is_reducer(m[0]['name'])]
+                    if red_filtered:
+                        matches = red_filtered
+
                 # Теперь сортируем и берём top
                 matches.sort(key=lambda x: x[1], reverse=True)
                 best_ratio = matches[0][1]
@@ -650,12 +664,6 @@ class MatchingService:
 
                 # Применяем оставшиеся фильтры
                 top_matches = filter_by_thread(top_matches, client_thread)
-
-                # Фильтр по разъемным муфтам (американка vs обычная)
-                top_matches = filter_by_detachable(top_matches, client_is_detachable)
-
-                # Фильтр по переходникам (разные диаметры)
-                top_matches = filter_by_reducer(top_matches, client_is_reducer)
 
                 # Фильтр по размерам фитингов (110/50 vs 110/110)
                 top_matches = filter_by_fitting_size(top_matches, client_fitting_size)
