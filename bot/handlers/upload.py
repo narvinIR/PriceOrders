@@ -244,6 +244,11 @@ async def handle_text_list(message: Message):
     202051110R 5
     Труба ПП 110-2000  10
     """
+    # КРИТИЧНО: Защита от бесконечного цикла
+    # Бот может получить свои же ответы как новые updates
+    if message.from_user.is_bot:
+        return
+
     text = message.text.strip()
 
     # Игнорируем команды

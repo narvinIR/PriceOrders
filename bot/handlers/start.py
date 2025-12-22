@@ -13,25 +13,19 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     """Приветственное сообщение"""
-    user_name = message.from_user.first_name or "Пользователь"
-    is_admin = message.from_user.id == ADMIN_ID
+    text = """
+Бот сопоставления артикулов с каталогом <b>Jakko</b>.
 
-    text = f"""
-<b>Привет, {user_name}!</b>
+<b>Как использовать:</b>
+• Отправь список артикулов (каждый с новой строки)
+• Или загрузи Excel файл с заказом
 
-Я бот для сопоставления артикулов с каталогом <b>Jakko</b>.
-
-<b>Что я умею:</b>
-• /search &lt;запрос&gt; — поиск товара по названию или артикулу
-• Отправь Excel файл — обработаю заказ и найду соответствия
+<b>Формат:</b> название количество
 
 <b>Пример:</b>
-<code>/search Труба ПП 110×2000</code>
+<code>Труба ПП 110×2000 5
+Отвод 45° 110 3</code>
 """
-
-    if is_admin:
-        text += "\n<b>Админ команды:</b>\n• /stats — статистика matching"
-
     await message.answer(text)
 
 
