@@ -185,6 +185,48 @@ async def process_items(message: Message, items: list):
     os.unlink(tmp_path)
 
 
+@router.message(F.photo)
+async def handle_photo(message: Message, bot: Bot):
+    """Обработка фото рукописного заказа через OCR"""
+    await message.answer("📷 Получил фото, распознаю текст...")
+
+    try:
+        # Берём наибольший размер фото
+        photo = message.photo[-1]
+
+        # Скачиваем
+        file = await bot.get_file(photo.file_id)
+        file_bytes = await bot.download_file(file.file_path)
+
+        # Конвертируем в bytes
+        image_bytes = file_bytes.read() if hasattr(file_bytes, 'read') else file_bytes
+
+        # OCR
+        from backend.services.ocr_service import get_ocr_service
+        ocr = get_ocr_service()
+        if not ocr:
+            await message.answer("OCR не настроен (нет OPENROUTER_API_KEY)")
+            return
+
+        items = ocr.recognize_order(image_bytes)
+
+        if not items:
+            await message.answer(
+                "Не удалось распознать текст на фото.\n\n"
+                "Попробуйте:\n"
+                "• Сделать фото более чётким\n"
+                "• Отправить список текстом"
+            )
+            return
+
+        logger.info(f"OCR: распознано {len(items)} позиций")
+        await process_items(message, items)
+
+    except Exception as e:
+        logger.error(f"Ошибка OCR: {e}", exc_info=True)
+        await message.answer(f"Ошибка распознавания: {e}")
+
+
 @router.message(F.document)
 async def handle_document(message: Message, bot: Bot):
     """Обработка загруженного файла (Excel/CSV)"""
