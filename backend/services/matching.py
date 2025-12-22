@@ -4,7 +4,8 @@ from uuid import UUID
 from fuzzywuzzy import fuzz
 from backend.models.database import get_supabase_client
 from backend.utils.normalizers import (
-    normalize_sku, normalize_name, extract_pipe_size, extract_fitting_size
+    normalize_sku, normalize_name, extract_pipe_size, extract_fitting_size,
+    extract_thread_size
 )
 from backend.config import settings
 from backend.models.schemas import MatchResult
@@ -35,7 +36,8 @@ def detect_client_category(client_name: str) -> str | None:
         return 'outdoor'
 
     # ППР (водопровод/отопление) - белый, но НЕ канализация
-    if any(x in name for x in ['ппр', 'ppr', 'водопровод', 'отоплен']):
+    # "ПП" = полипропилен = ППР
+    if any(x in name for x in ['ппр', 'ppr', 'водопровод', 'отоплен', ' пп ', 'пп ']):
         return 'ppr'
     if 'бел' in name and not is_sewer:
         return 'ppr'
@@ -57,10 +59,13 @@ def extract_product_type(name: str) -> str | None:
     name_lower = name.lower()
 
     # Порядок важен - более специфичные первые
+    # ВАЖНО: "ред" должен быть ДО "муфт", т.к. "Муфта ред." = "Муфта переходник"
     types = [
         ('крестовин', 'крестовина'),
         ('тройник', 'тройник'),
         ('переход', 'переходник'),
+        ('ред', 'переходник'),  # "ред." = редукционный = переходник
+        ('разъемн', 'муфта'),  # муфта разъемная = американка
         ('отвод', 'отвод'),
         ('колено', 'отвод'),
         ('угол', 'отвод'),
@@ -218,6 +223,21 @@ def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
 
     # Если клиент указал 2+ размера - точное совпадение
     if len(client_size) >= 2:
+        # Для 3 размеров (тройник переходник 40-25-40) - точное совпадение
+        if len(client_size) == 3:
+            filtered = [m for m in matches
+                        if extract_fitting_size(get_product(m)['name']) == client_size]
+            if filtered:
+                return filtered
+            # Fallback: ищем тройник с правильными крайними размерами
+            outer1, inner, outer2 = client_size
+            filtered = [m for m in matches
+                        if (ps := extract_fitting_size(get_product(m)['name']))
+                        and len(ps) >= 2
+                        and ps[0] == outer1 and inner in ps]
+            return filtered if filtered else matches
+
+        # Для 2 размеров - точное совпадение
         filtered = [m for m in matches
                     if extract_fitting_size(get_product(m)['name']) == client_size]
         return filtered if filtered else matches
@@ -236,6 +256,36 @@ def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
                    if (ps := extract_fitting_size(get_product(m)['name']))
                    and ps[0] == single_size]
     return first_match if first_match else matches
+
+
+def filter_by_thread_size(matches: list, client_thread: tuple | None) -> list:
+    """
+    Фильтрует по размеру резьбы (32×1", 25×3/4" и т.д.)
+
+    client_thread: (мм, дюймы) - например (32, "1")
+    """
+    if not matches or not client_thread or len(matches) <= 1:
+        return matches
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    mm, inches = client_thread
+    # Ищем товары с таким же размером резьбы в названии
+    # Форматы каталога: "32x1"", "32×1"", "32*1""
+    filtered = []
+    for m in matches:
+        name = get_product(m)['name'].lower()
+        # Проверяем наличие размера с резьбой
+        if (f'{mm}x{inches}"' in name or
+            f'{mm}×{inches}"' in name or
+            f'{mm}*{inches}"' in name or
+            f'{mm}-{inches}"' in name):
+            filtered.append(m)
+
+    return filtered if filtered else matches
 
 
 def is_eco_product(name: str) -> bool:
@@ -465,6 +515,7 @@ class MatchingService:
             # Извлекаем параметры из клиентского запроса
             client_size = extract_pipe_size(client_name or "")
             client_fitting_size = extract_fitting_size(client_name or "")
+            client_thread_size = extract_thread_size(client_name or "")
             client_cat = detect_client_category(client_name or "")
             client_type = extract_product_type(client_name or "")
             client_angle = extract_angle(client_name or "")
@@ -526,6 +577,9 @@ class MatchingService:
 
                 # Фильтр по размерам фитингов (110/50 vs 110/110)
                 top_matches = filter_by_fitting_size(top_matches, client_fitting_size)
+
+                # Фильтр по размеру резьбы (32×1" для муфт НР/ВР)
+                top_matches = filter_by_thread_size(top_matches, client_thread_size)
 
                 # Хомуты - фильтруем по диапазону мм
                 if clamp_mm and len(top_matches) > 1:
@@ -619,12 +673,14 @@ class MatchingService:
                 client_angle = extract_angle(client_name)
                 client_thread = extract_thread_type(client_name)
                 client_fitting_size = extract_fitting_size(client_name)
+                client_thread_size = extract_thread_size(client_name)
 
                 filtered = filter_by_product_type(results, client_type)
                 filtered = filter_by_angle(filtered, client_angle)
                 filtered = filter_by_thread(filtered, client_thread)
                 filtered = filter_by_category(filtered, client_cat)
                 filtered = filter_by_fitting_size(filtered, client_fitting_size)
+                filtered = filter_by_thread_size(filtered, client_thread_size)
 
                 if filtered:
                     product, score = filtered[0]

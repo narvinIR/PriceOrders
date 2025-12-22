@@ -24,6 +24,7 @@ backend/
 │   └── schemas.py       # Pydantic модели
 ├── services/
 │   ├── matching.py      # 7-уровневый алгоритм маппинга
+│   ├── llm_matcher.py   # LLM matching через OpenRouter API
 │   ├── embeddings.py    # ML semantic search (FAISS)
 │   └── excel.py         # Парсинг Excel (Jakko формат)
 ├── routers/
@@ -45,15 +46,30 @@ tests/
 
 ## Ключевые концепции
 
-### 7-уровневый алгоритм matching (v3.0)
+### 7-уровневый алгоритм matching (v3.1)
 
 1. **Точное SKU** (100%) - прямое совпадение артикула
 2. **Точное название** (95%) - полное совпадение после нормализации
 3. **Кэшированный маппинг** (100%) - сохранённые подтверждённые связи
 4. **Fuzzy SKU** (90%) - Levenshtein distance ≤ 1
 5. **Fuzzy название** (80%) - с фильтрами по типу, углу, категории
-6. **Semantic embedding** (≤75%) - ML поиск через FAISS + фильтры
+6. **LLM matching** (≤75%) - OpenRouter API (Grok 4.1 fast)
 7. **Не найдено** (0%) - требует ручной проверки
+
+### LLM Matching (v3.1)
+
+LLM matching через OpenRouter API заменяет локальный ML (экономит ~500 МБ RAM).
+
+**Промпт хранится в Supabase:**
+- Таблица: `settings`
+- Ключ: `llm_system_prompt`
+- Кэширование: 10 минут
+- Fallback: `DEFAULT_SYSTEM_PROMPT` в коде
+
+**Редактирование промпта:**
+```sql
+UPDATE settings SET value = '...' WHERE key = 'llm_system_prompt';
+```
 
 ### Фильтры matching (v3.0)
 
