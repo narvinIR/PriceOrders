@@ -36,7 +36,7 @@ DEFAULT_OCR_PROMPT = """Ты OCR система для распознавани�
 class OCRService:
     """Распознавание рукописных заказов через Vision LLM"""
 
-    def __init__(self, api_key: str, model: str = "qwen/qwen2.5-vl-32b-instruct:free"):
+    def __init__(self, api_key: str, model: str = "qwen/qwen3-vl-32b-instruct"):
         self.api_key = api_key
         self.model = model
 

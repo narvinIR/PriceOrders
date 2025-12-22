@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     llm_model: str = os.getenv("LLM_MODEL", "moonshotai/kimi-k2-thinking")
 
     # OCR для рукописных заказов (Vision LLM)
-    ocr_model: str = os.getenv("OCR_MODEL", "qwen/qwen2.5-vl-32b-instruct:free")
+    ocr_model: str = os.getenv("OCR_MODEL", "qwen/qwen3-vl-32b-instruct")
     fuzzy_threshold: int = 70  # Понижен с 75 для better recall (муфты 202 имеют score 73)
     confidence_exact_sku: float = 100.0
     confidence_exact_name: float = 95.0
