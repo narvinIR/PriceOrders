@@ -136,6 +136,7 @@ class LLMMatcher:
         if not query or len(query.strip()) < 2:
             return None
 
+        content = ""  # Инициализация до try блока
         try:
             response = httpx.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -182,7 +183,7 @@ class LLMMatcher:
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"LLM JSON parse error: {e}, content: {content[:100]}")
+            logger.error(f"LLM JSON parse error: {e}, content: {content[:100] if content else 'empty'}")
             return None
         except httpx.TimeoutException:
             logger.error("LLM API timeout (30s)")

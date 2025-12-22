@@ -15,6 +15,9 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Ограничение размера файла (50 MB)
+MAX_FILE_SIZE = 50 * 1024 * 1024
+
 router = Router()
 
 # Singleton для MatchingService - ML модель загружается ОДИН раз
@@ -87,7 +90,26 @@ async def _process_items_parallel(items: list) -> tuple[list, int, int]:
         asyncio.to_thread(_match_single_item, matcher, item)
         for item in items
     ]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Фильтруем исключения
+    valid_results = []
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            logger.error(f"❌ Ошибка обработки позиции {i}: {r}")
+            valid_results.append({
+                'Запрос': items[i].get('sku', '') or items[i].get('name', ''),
+                'Артикул Jakko': '❌ ОШИБКА',
+                'Название Jakko': str(r)[:50],
+                'Кол-во': items[i].get('qty', 1),
+                'Упаковка': 1,
+                'Точность': '0%',
+                'Метод': 'error',
+                '_matched': False,
+            })
+        else:
+            valid_results.append(r)
+    results = valid_results
 
     # Подсчитываем статистику
     matched = sum(1 for r in results if r.get('_matched'))
@@ -169,6 +191,14 @@ async def handle_document(message: Message, bot: Bot):
     document = message.document
     filename = document.file_name.lower()
 
+    # Проверяем размер файла (защита от DoS)
+    if document.file_size and document.file_size > MAX_FILE_SIZE:
+        await message.answer(
+            f"⚠️ Файл слишком большой ({document.file_size // 1024 // 1024} MB).\n"
+            f"Максимальный размер: {MAX_FILE_SIZE // 1024 // 1024} MB"
+        )
+        return
+
     # Проверяем тип файла
     if not filename.endswith(('.xlsx', '.xls', '.csv')):
         await message.answer(
@@ -243,6 +273,13 @@ async def handle_document(message: Message, bot: Bot):
         await process_items(message, items)
 
     except Exception as e:
+        # Очищаем временный файл при ошибке
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        logger.error(f"❌ Ошибка обработки файла: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка обработки файла: {e}")
 
 
