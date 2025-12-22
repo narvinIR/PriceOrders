@@ -5,7 +5,7 @@ from fuzzywuzzy import fuzz
 from backend.models.database import get_supabase_client
 from backend.utils.normalizers import (
     normalize_sku, normalize_name, extract_pipe_size, extract_fitting_size,
-    extract_thread_size
+    extract_thread_size, is_coupling_detachable, is_reducer
 )
 from backend.config import settings
 from backend.models.schemas import MatchResult
@@ -169,6 +169,51 @@ def filter_by_product_type(matches: list, client_type: str | None) -> list:
 
     filtered = [m for m in matches
                 if extract_product_type(get_product(m)['name']) == client_type]
+
+    return filtered if filtered else matches
+
+
+def filter_by_detachable(matches: list, client_is_detachable: bool) -> list:
+    """
+    Фильтрует по типу муфты: разъемная (американка) vs обычная.
+
+    Если клиент запрашивает "разъемную" или "американку", показываем только разъемные.
+    Если нет - не фильтруем (показываем все).
+    """
+    if not matches or not client_is_detachable or len(matches) <= 1:
+        return matches
+
+    from backend.utils.normalizers import is_coupling_detachable
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    filtered = [m for m in matches
+                if is_coupling_detachable(get_product(m)['name'])]
+
+    return filtered if filtered else matches
+
+
+def filter_by_reducer(matches: list, client_is_reducer: bool) -> list:
+    """
+    Фильтрует по признаку переходника (разные диаметры).
+
+    Если клиент запрашивает "переходник/переходную", показываем только переходники.
+    """
+    if not matches or not client_is_reducer or len(matches) <= 1:
+        return matches
+
+    from backend.utils.normalizers import is_reducer
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    filtered = [m for m in matches
+                if is_reducer(get_product(m)['name'])]
 
     return filtered if filtered else matches
 
@@ -548,6 +593,8 @@ class MatchingService:
             client_angle = extract_angle(client_name or "")
             clamp_mm = extract_mm_from_clamp(client_name or "")
             client_wants_eco = is_eco_product(client_name or "")
+            client_is_detachable = is_coupling_detachable(client_name or "")
+            client_is_reducer = is_reducer(client_name or "")
 
             # Собираем все совпадения выше порога
             matches = []
@@ -603,6 +650,12 @@ class MatchingService:
 
                 # Применяем оставшиеся фильтры
                 top_matches = filter_by_thread(top_matches, client_thread)
+
+                # Фильтр по разъемным муфтам (американка vs обычная)
+                top_matches = filter_by_detachable(top_matches, client_is_detachable)
+
+                # Фильтр по переходникам (разные диаметры)
+                top_matches = filter_by_reducer(top_matches, client_is_reducer)
 
                 # Фильтр по размерам фитингов (110/50 vs 110/110)
                 top_matches = filter_by_fitting_size(top_matches, client_fitting_size)
@@ -713,10 +766,14 @@ class MatchingService:
                 client_thread = extract_thread_type(client_name)
                 client_fitting_size = extract_fitting_size(client_name)
                 client_thread_size = extract_thread_size(client_name)
+                client_is_detachable = is_coupling_detachable(client_name)
+                client_is_reducer = is_reducer(client_name)
 
                 filtered = filter_by_product_type(results, client_type)
                 filtered = filter_by_angle(filtered, client_angle)
                 filtered = filter_by_thread(filtered, client_thread)
+                filtered = filter_by_detachable(filtered, client_is_detachable)
+                filtered = filter_by_reducer(filtered, client_is_reducer)
                 filtered = filter_by_category(filtered, client_cat)
                 filtered = filter_by_fitting_size(filtered, client_fitting_size)
                 filtered = filter_by_thread_size(filtered, client_thread_size)
