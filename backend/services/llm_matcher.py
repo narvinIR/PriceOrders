@@ -5,6 +5,7 @@ LLM-based matching через OpenRouter API.
 """
 import json
 import logging
+import re
 import time
 import httpx
 from typing import Optional
@@ -179,6 +180,12 @@ class LLMMatcher:
                 if content.startswith("json"):
                     content = content[4:]
             content = content.strip()
+
+            # Извлекаем только JSON объект (игнорируем текст после него)
+            # Kimi K2 иногда добавляет пояснения после JSON
+            json_match = re.search(r'\{[^{}]*\}', content)
+            if json_match:
+                content = json_match.group(0)
 
             result = json.loads(content)
             logger.info(f"LLM match: '{query}' → {result.get('sku')} ({result.get('confidence')}%)")
