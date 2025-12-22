@@ -4,13 +4,15 @@ Telegram бот PriceOrders - сопоставление артикулов B2B.
 """
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
+from collections import OrderedDict
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 import uvicorn
 
 from bot.config import (
@@ -23,6 +25,12 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Дедупликация webhook запросов (update_id → timestamp)
+# Telegram повторяет webhook если не получает 200 OK быстро
+_processed_updates: OrderedDict[int, float] = OrderedDict()
+_MAX_CACHE_SIZE = 1000
+_UPDATE_TTL = 300  # 5 минут
 
 # Bot и Dispatcher
 bot = Bot(
@@ -118,12 +126,54 @@ async def health():
     return {"status": "ok", "service": "priceorders-bot"}
 
 
-@app.post(WEBHOOK_PATH)
-async def webhook_handler(update: dict):
-    """Обработка webhook от Telegram"""
+def _cleanup_old_updates():
+    """Очистка старых update_id из кэша"""
+    now = time.time()
+    while _processed_updates:
+        oldest_id, oldest_time = next(iter(_processed_updates.items()))
+        if now - oldest_time > _UPDATE_TTL:
+            _processed_updates.pop(oldest_id)
+        else:
+            break
+    # Лимит размера кэша
+    while len(_processed_updates) > _MAX_CACHE_SIZE:
+        _processed_updates.popitem(last=False)
+
+
+async def _process_update_background(update: dict):
+    """Фоновая обработка update (не блокирует webhook response)"""
     from aiogram.types import Update
-    telegram_update = Update.model_validate(update, context={"bot": bot})
-    await dp.feed_update(bot, telegram_update)
+    try:
+        telegram_update = Update.model_validate(update, context={"bot": bot})
+        await dp.feed_update(bot, telegram_update)
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки update: {e}", exc_info=True)
+
+
+@app.post(WEBHOOK_PATH)
+async def webhook_handler(update: dict, background_tasks: BackgroundTasks):
+    """
+    Обработка webhook от Telegram.
+
+    ВАЖНО: Возвращаем 200 OK СРАЗУ, обработка в фоне.
+    Это предотвращает повторные запросы от Telegram при долгой обработке.
+    """
+    update_id = update.get("update_id")
+
+    # Дедупликация - игнорируем уже обработанные update_id
+    if update_id in _processed_updates:
+        logger.warning(f"⚠️ Дубликат update_id={update_id}, игнорирую")
+        return {"ok": True}
+
+    # Помечаем как обрабатываемый ДО начала обработки
+    _processed_updates[update_id] = time.time()
+    _cleanup_old_updates()
+
+    logger.info(f"📨 Webhook update_id={update_id}")
+
+    # Обработка в фоне - webhook возвращает 200 OK сразу
+    background_tasks.add_task(_process_update_background, update)
+
     return {"ok": True}
 
 
