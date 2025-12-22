@@ -242,16 +242,24 @@ def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
                     if extract_fitting_size(get_product(m)['name']) == client_size]
         return filtered if filtered else matches
 
-    # Если клиент указал 1 размер (110) - сначала ищем одинаковые размеры (110-110)
+    # Если клиент указал 1 размер (110) - ищем товары с ОДНИМ размером или одинаковыми
     single_size = client_size[0]
 
-    # Приоритет 1: Одинаковые размеры (110-110, 50-50) - прямой фитинг
+    # Приоритет 1: Товары с одним размером (просто 110, без второго размера)
+    # Это важно для отводов: "отвод 110" != "отвод 110-50"
+    single_only = [m for m in matches
+                   if (ps := extract_fitting_size(get_product(m)['name']))
+                   and len(ps) == 1 and ps[0] == single_size]
+    if single_only:
+        return single_only
+
+    # Приоритет 2: Одинаковые размеры (110-110, 50-50) - прямой тройник/муфта
     same_size = [m for m in matches
                  if extract_fitting_size(get_product(m)['name']) == (single_size, single_size)]
     if same_size:
         return same_size
 
-    # Приоритет 2: Первый размер совпадает (110-50, 110-110)
+    # Приоритет 3: Первый размер совпадает (110-50, 110-110) - fallback
     first_match = [m for m in matches
                    if (ps := extract_fitting_size(get_product(m)['name']))
                    and ps[0] == single_size]
