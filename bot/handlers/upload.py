@@ -284,29 +284,37 @@ async def handle_text_list(message: Message):
         #   "Тройник ПП 40-  400шт" → sku="Тройник ПП 40", qty=400
         #   "Труба арм. 90(20)- 156 м." → sku="Труба арм. 90(20)", qty=156
         #   "Труба PN25  40*6,7	52" → sku="Труба PN25 40*6,7", qty=52
+        #   "СТкв отвод 110 /40/ !" → sku="СТкв отвод 110", qty=40
         #   "Хомут 110 80" → sku="Хомут 110", qty=80
 
-        # Убираем TAB → пробел
-        line = line.replace('\t', ' ')
+        # Убираем TAB → пробел, убираем ! (маркер клиента)
+        line = line.replace('\t', ' ').replace('!', '').strip()
 
-        # Паттерн: название[-] количество[шт|м.|м|штук]
-        match = re.match(
-            r'^(.+?)[-\s]+(\d+)\s*(?:шт\.?|штук|м\.?|метр\.?)?\s*$',
-            line,
-            re.IGNORECASE
-        )
-        if match:
-            sku = match.group(1).strip().rstrip('-')
-            qty = int(match.group(2))
+        # Паттерн 0: формат СТ "/число/" - количество в слешах
+        # Пример: "СТкв отвод 110 угол 45гр /40/" → qty=40
+        match_st = re.search(r'/(\d+)/\s*$', line)
+        if match_st:
+            qty = int(match_st.group(1))
+            sku = re.sub(r'\s*/\d+/\s*$', '', line).strip()
         else:
-            # Fallback: число в конце через пробел
-            match2 = re.match(r'^(.+?)\s+(\d+)\s*$', line)
-            if match2:
-                sku = match2.group(1).strip()
-                qty = int(match2.group(2))
+            # Паттерн 1: название[-] количество[шт|м.|м|штук]
+            match = re.match(
+                r'^(.+?)[-\s]+(\d+)\s*(?:шт\.?|штук|м\.?|метр\.?)?\s*$',
+                line,
+                re.IGNORECASE
+            )
+            if match:
+                sku = match.group(1).strip().rstrip('-')
+                qty = int(match.group(2))
             else:
-                sku = line
-                qty = 1
+                # Fallback: число в конце через пробел
+                match2 = re.match(r'^(.+?)\s+(\d+)\s*$', line)
+                if match2:
+                    sku = match2.group(1).strip()
+                    qty = int(match2.group(2))
+                else:
+                    sku = line
+                    qty = 1
 
         if sku:
             items.append({'sku': sku, 'name': '', 'qty': qty})
