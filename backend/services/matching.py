@@ -88,15 +88,28 @@ def extract_product_type(name: str) -> str | None:
 
 
 def extract_angle(name: str) -> int | None:
-    """Извлечь угол из названия (45°, 67°, 87°, 90°)"""
-    m = re.search(r'\b(45|67|87|90)\s*[°градус]?', name.lower())
+    """Извлечь угол из названия (15°, 30°, 45°, 67°, 87°, 90°)"""
+    # Поддерживаем все углы, даже если в каталоге их нет
+    m = re.search(r'\b(15|30|45|67|87|90)\s*[°градус]?', name.lower())
     if m:
         return int(m.group(1))
     # Альтернативный формат: /45, /90
-    m = re.search(r'/\s*(45|67|87|90)\b', name.lower())
+    m = re.search(r'/\s*(15|30|45|67|87|90)\b', name.lower())
     if m:
         return int(m.group(1))
     return None
+
+
+def normalize_angle(angle: int | None) -> int | None:
+    """
+    Нормализовать угол к стандартному каталогу Jakko.
+    90° → 87° (в каталоге Jakko используется 87° вместо 90°)
+    """
+    if angle is None:
+        return None
+    if angle == 90:
+        return 87  # Jakko convention: 87° вместо 90°
+    return angle
 
 
 def filter_by_category(matches: list, client_cat: str | None) -> list:
@@ -161,9 +174,15 @@ def filter_by_product_type(matches: list, client_type: str | None) -> list:
 
 
 def filter_by_angle(matches: list, client_angle: int | None) -> list:
-    """Фильтрует по углу (45°, 87°, 90°)"""
+    """
+    Фильтрует по углу (15°, 30°, 45°, 67°, 87°, 90°).
+    90° нормализуется в 87° (Jakko convention).
+    """
     if not matches or not client_angle or len(matches) <= 1:
         return matches
+
+    # Нормализуем угол клиента (90° → 87°)
+    normalized_angle = normalize_angle(client_angle)
 
     is_tuple = isinstance(matches[0], tuple)
 
@@ -171,7 +190,7 @@ def filter_by_angle(matches: list, client_angle: int | None) -> list:
         return m[0] if is_tuple else m
 
     filtered = [m for m in matches
-                if extract_angle(get_product(m)['name']) == client_angle]
+                if extract_angle(get_product(m)['name']) == normalized_angle]
 
     return filtered if filtered else matches
 
@@ -560,12 +579,14 @@ class MatchingService:
                     if type_filtered:
                         matches = type_filtered
 
-                # Фильтр по углу - применяем ко всем
+                # Фильтр по углу - применяем ко всем (с нормализацией 90° → 87°)
                 if client_angle:
-                    angle_filtered = [m for m in matches
-                                      if extract_angle(m[0]['name']) == client_angle]
-                    if angle_filtered:
-                        matches = angle_filtered
+                    normalized_angle = normalize_angle(client_angle)
+                    if normalized_angle:  # None = угол не существует (30° в старых данных)
+                        angle_filtered = [m for m in matches
+                                          if extract_angle(m[0]['name']) == normalized_angle]
+                        if angle_filtered:
+                            matches = angle_filtered
 
                 # Фильтр по категории - применяем ко ВСЕМ matches (критично для муфт)
                 # Иначе 604 (рифленые) могут иметь выше score чем 202 (канализация)

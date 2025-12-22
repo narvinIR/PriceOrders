@@ -302,10 +302,11 @@ def extract_fitting_size(name: str) -> tuple[int, ...] | None:
     # Ищем число 25-200 в любом месте названия после типа товара
     # Паттерн: тип товара ... число (через любые слова)
     name_lower = clean_name.lower()
-    types_pattern = r'(муфт|заглуш|ревизи|крестовин|тройник|переход|отвод|сифон)'
+    types_pattern = r'(муфт|заглуш|ревизи|крестовин|тройник|переход|отвод|сифон|клипс|хомут)'
     if re.search(types_pattern, name_lower):
         # Ищем все числа 25-200 в названии
-        numbers = [int(n) for n in re.findall(r'\b(\d{2,3})\b', name_lower) if 25 <= int(n) <= 200]
+        # Паттерны: "110", "110мм", "d50мм", "d110"
+        numbers = [int(n) for n in re.findall(r'(?:\b|d)(\d{2,3})(?:мм)?\b', name_lower) if 25 <= int(n) <= 200]
         if numbers:
             return (numbers[0],)  # Берём первое подходящее число
 
