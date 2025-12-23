@@ -18,11 +18,16 @@ logger = logging.getLogger(__name__)
 def detect_client_category(client_name: str) -> str | None:
     """
     Определить категорию из запроса клиента.
-    Returns: 'pnd', 'prestige', 'outdoor', 'ppr', 'sewer', или None
+    Returns: 'pert', 'pnd', 'prestige', 'outdoor', 'ppr', 'sewer', или None
     """
     name = client_name.lower()
 
     is_sewer = any(x in name for x in ['кан', 'канализац', 'сантех'])
+
+    # PERT (полиэтилен термостойкий) - артикулы 501...
+    # ВАЖНО: проверять ДО ПНД и ППР!
+    if any(x in name for x in ['pert', 'pe-rt', 'термостойк']):
+        return 'pert'
 
     # ПНД (полиэтилен, компрессионные фитинги) - артикулы 704...
     # ВАЖНО: проверять ДО ППР, т.к. оба для водопровода!
@@ -137,7 +142,12 @@ def filter_by_category(matches: list, client_cat: str | None) -> list:
         return m[0] if is_tuple else m
 
     filtered = None
-    if client_cat == 'pnd':
+    if client_cat == 'pert':
+        # PERT - артикулы 501xxx (полиэтилен термостойкий)
+        filtered = [m for m in matches
+                    if get_product(m).get('sku', '').startswith('501')
+                    or 'pert' in get_product(m)['name'].lower()]
+    elif client_cat == 'pnd':
         # ПНД - артикулы 704xxx (компрессионные фитинги)
         filtered = [m for m in matches
                     if get_product(m).get('sku', '').startswith('704')
@@ -147,9 +157,12 @@ def filter_by_category(matches: list, client_cat: str | None) -> list:
                     if 'малошум' in get_product(m).get('category', '').lower()
                     or 'prestige' in get_product(m)['name'].lower()]
     elif client_cat == 'outdoor':
+        # Наружная канализация: 303xxx + рифленые 604xxx
         filtered = [m for m in matches
-                    if 'наружн' in get_product(m).get('category', '').lower()
-                    or 'нар.кан' in get_product(m)['name'].lower()]
+                    if get_product(m).get('sku', '').startswith(('303', '604'))
+                    or 'наружн' in get_product(m).get('category', '').lower()
+                    or 'нар.кан' in get_product(m)['name'].lower()
+                    or 'рифлен' in get_product(m)['name'].lower()]
     elif client_cat == 'ppr':
         filtered = [m for m in matches
                     if 'ппр' in get_product(m).get('category', '').lower()
@@ -258,11 +271,11 @@ def filter_by_angle(matches: list, client_angle: int | None) -> list:
 def extract_thread_type(name: str) -> str | None:
     """Извлечь тип резьбы: 'вн' (внутренняя) или 'нар' (наружная)"""
     name_lower = name.lower()
-    # Паттерны: в/р, вн.рез, вн. рез, внутр
-    if any(x in name_lower for x in ['в/р', 'вн.рез', 'вн. рез', 'вн рез', 'внутр']):
+    # Паттерны внутренней резьбы: в/р, вн.рез, вн. рез, внутр, (вр), вр)
+    if any(x in name_lower for x in ['в/р', 'вн.рез', 'вн. рез', 'вн рез', 'внутр', '(вр)', 'вр)', ' вр ']):
         return 'вн'
-    # Паттерны: н/р, нар.рез, нар. рез, наруж
-    if any(x in name_lower for x in ['н/р', 'нар.рез', 'нар. рез', 'нар рез', 'наруж']):
+    # Паттерны наружной резьбы: н/р, нар.рез, нар. рез, наруж, (нр), нр)
+    if any(x in name_lower for x in ['н/р', 'нар.рез', 'нар. рез', 'нар рез', 'наруж', '(нр)', 'нр)', ' нр ']):
         return 'нар'
     return None
 
