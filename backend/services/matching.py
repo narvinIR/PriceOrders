@@ -39,6 +39,9 @@ def detect_client_category(client_name: str) -> str | None:
     # "ПП" = полипропилен = ППР
     if any(x in name for x in ['ппр', 'ppr', 'водопровод', 'отоплен', ' пп ', 'пп ']):
         return 'ppr'
+    # Армированная труба = ППР (не канализация!)
+    if any(x in name for x in ['армир', 'арм.', 'арм ']):
+        return 'ppr'
     if 'бел' in name and not is_sewer:
         return 'ppr'
 
@@ -73,6 +76,8 @@ def extract_product_type(name: str) -> str | None:
         ('заглуш', 'заглушка'),
         ('ревизи', 'ревизия'),
         ('патруб', 'патрубок'),
+        ('опор', 'клипса'),  # опора для труб = клипса
+        ('клипс', 'клипса'),
         ('труб', 'труба'),
         ('хомут', 'хомут'),
         ('кран', 'кран'),
@@ -301,10 +306,10 @@ def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
                         and ps[0] == outer1 and inner in ps]
             return filtered if filtered else matches
 
-        # Для 2 размеров - точное совпадение
+        # Для 2 размеров - точное совпадение (БЕЗ fallback!)
         filtered = [m for m in matches
                     if extract_fitting_size(get_product(m)['name']) == client_size]
-        return filtered if filtered else matches
+        return filtered  # Не возвращаем все matches если нет совпадения!
 
     # Если клиент указал 1 размер (110) - ищем товары с ОДНИМ размером или одинаковыми
     single_size = client_size[0]
@@ -705,6 +710,12 @@ class MatchingService:
                                      if p["sku"] == llm_result["sku"]),
                                     None
                                 )
+                                # Валидация размеров фитинга
+                                if llm_product and client_fitting_size:
+                                    product_size = extract_fitting_size(llm_product['name'])
+                                    if product_size and product_size != client_fitting_size:
+                                        logger.debug(f"LLM L6 size mismatch: {client_fitting_size} vs {product_size}")
+                                        llm_product = None
                                 if llm_product:
                                     return self._finalize_match(MatchResult(
                                         product_id=UUID(llm_product['id']),

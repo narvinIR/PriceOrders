@@ -42,3 +42,5 @@ Thumbs.db
 MCP_SETUP_PROMPT.md
 RESEARCH_PROMPT.md
 *.xlsx
+test_ocr*.py
+photo_*.jpg
