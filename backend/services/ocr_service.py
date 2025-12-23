@@ -142,7 +142,27 @@ class OCRService:
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"OCR JSON parse error: {e}, content: {content[:200] if content else 'empty'}")
+            logger.warning(f"OCR JSON parse warning: {e}, trying text fallback...")
+            # Fallback: пробуем извлечь позиции из текстового формата
+            if content:
+                result = []
+                lines = content.strip().split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if not line or line.startswith(('#', '//', '-')):
+                        continue
+                    # Паттерн: "название qty" или "название - qty"
+                    match = re.match(r'^(.+?)[-:\s]+(\d{1,3})\s*$', line)
+                    if match:
+                        name = match.group(1).strip()
+                        if name and any(c.isalpha() for c in name):
+                            result.append({"name": name, "qty": int(match.group(2)), "sku": ""})
+                    elif any(c.isalpha() for c in line):
+                        result.append({"name": line, "qty": 1, "sku": ""})
+                if result:
+                    logger.info(f"OCR fallback: извлечено {len(result)} позиций из текста")
+                    return result
+            logger.error(f"OCR fallback failed, content: {content[:200] if content else 'empty'}")
             return []
         except httpx.TimeoutException:
             logger.error("OCR API timeout (60s)")

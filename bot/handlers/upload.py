@@ -318,7 +318,7 @@ async def handle_document(message: Message, bot: Bot):
                     df = pd.read_csv(tmp_path, sep=sep)
                     if len(df.columns) > 1:
                         break
-                except:
+                except Exception:
                     continue
             else:
                 df = pd.read_csv(tmp_path)
@@ -356,7 +356,7 @@ async def handle_document(message: Message, bot: Bot):
             qty_raw = row.get(qty_col, 1) if qty_col else 1
             try:
                 qty = int(float(qty_raw)) if pd.notna(qty_raw) else 1
-            except:
+            except (ValueError, TypeError):
                 qty = 1
 
             if sku or name:
@@ -422,14 +422,15 @@ async def handle_text_list(message: Message):
 
         # Паттерн 0: формат СТ "/число/" - количество в слешах
         # Пример: "СТкв отвод 110 угол 45гр /40/" → qty=40
-        match_st = re.search(r'/(\d+)/\s*$', line)
+        match_st = re.search(r'/(\d{1,3})/\s*$', line)  # qty 1-999
         if match_st:
             qty = int(match_st.group(1))
             sku = re.sub(r'\s*/\d+/\s*$', '', line).strip()
         else:
             # Паттерн 1: название[-] количество[шт|м.|м|штук]
+            # qty ограничено 1-999 чтобы не ловить размеры (3000, 2000)
             match = re.match(
-                r'^(.+?)[-\s]+(\d+)\s*(?:шт\.?|штук|м\.?|метр\.?)?\s*$',
+                r'^(.+?)[-\s]+(\d{1,3})\s*(?:шт\.?|штук|м\.?|метр\.?)?\s*$',
                 line,
                 re.IGNORECASE
             )
@@ -437,8 +438,9 @@ async def handle_text_list(message: Message):
                 sku = match.group(1).strip().rstrip('-')
                 qty = int(match.group(2))
             else:
-                # Fallback: число в конце через пробел
-                match2 = re.match(r'^(.+?)\s+(\d+)\s*$', line)
+                # Fallback: число 1-999 в конце через пробел
+                # (исключаем размеры труб: 1000, 2000, 3000...)
+                match2 = re.match(r'^(.+?)\s+(\d{1,3})\s*$', line)
                 if match2:
                     sku = match2.group(1).strip()
                     qty = int(match2.group(2))
