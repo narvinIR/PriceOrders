@@ -322,12 +322,13 @@ def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
                         if extract_fitting_size(get_product(m)['name']) == client_size]
             if filtered:
                 return filtered
-            # Fallback: ищем тройник с правильными крайними размерами
-            outer1, inner, outer2 = client_size
+            # Fallback: допускаем перестановку крайних размеров
+            # 40-25-40 == 40-25-40 (средний размер должен совпадать точно)
             filtered = [m for m in matches
                         if (ps := extract_fitting_size(get_product(m)['name']))
-                        and len(ps) >= 2
-                        and ps[0] == outer1 and inner in ps]
+                        and len(ps) == 3
+                        and ps[1] == client_size[1]  # средний размер точно
+                        and set([ps[0], ps[2]]) == set([client_size[0], client_size[2]])]
             return filtered if filtered else matches
 
         # Для 2 размеров - точное совпадение, с fallback по первому размеру

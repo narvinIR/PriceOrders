@@ -102,11 +102,13 @@ async def callback_confirm(callback: CallbackQuery):
     """Подтверждение соответствия"""
     search_id = callback.data.split(":")[1]
 
-    if search_id not in _search_results:
+    # Атомарный pop() вместо check + pop (race condition fix)
+    result = _search_results.pop(search_id, None)
+    if result is None:
         await callback.answer("⏰ Результат устарел, повторите поиск")
         return
 
-    data, _ = _search_results.pop(search_id)  # Извлекаем data из tuple (data, timestamp)
+    data, _ = result  # Извлекаем data из tuple (data, timestamp)
 
     # TODO: Сохранить маппинг в Supabase
     await callback.message.edit_text(
