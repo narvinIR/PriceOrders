@@ -242,10 +242,37 @@ async def handle_document(message: Message, bot: Bot):
         return
 
     # Проверяем тип файла
+    # Изображения → OCR
+    if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        await message.answer("📷 Получил фото, распознаю текст...")
+        try:
+            file = await bot.get_file(document.file_id)
+            file_bytes = await bot.download_file(file.file_path)
+            image_bytes = file_bytes.read() if hasattr(file_bytes, 'read') else file_bytes
+
+            from backend.services.ocr_service import get_ocr_service
+            ocr = get_ocr_service()
+            if not ocr:
+                await message.answer("❌ OCR не настроен")
+                return
+
+            items = ocr.recognize_order(image_bytes)
+            if not items:
+                await message.answer("❌ Не удалось распознать текст на фото")
+                return
+
+            logger.info(f"OCR (document): распознано {len(items)} позиций")
+            await process_items(message, items)
+        except Exception as e:
+            logger.error(f"Ошибка OCR: {e}", exc_info=True)
+            await message.answer(f"❌ Ошибка распознавания: {e}")
+        return
+
+    # Excel/CSV
     if not filename.endswith(('.xlsx', '.xls', '.csv')):
         await message.answer(
-            "⚠️ Поддерживаются файлы: Excel (.xlsx, .xls), CSV (.csv)\n\n"
-            "Или отправьте текстовый список артикулов (каждый с новой строки)."
+            "⚠️ Поддерживаются: Excel, CSV, фото\n\n"
+            "Или отправьте текст с артикулами."
         )
         return
 
