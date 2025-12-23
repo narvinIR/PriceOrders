@@ -1,5 +1,6 @@
 import re
 import logging
+from threading import Lock
 from uuid import UUID
 from fuzzywuzzy import fuzz
 from backend.models.database import get_supabase_client
@@ -443,6 +444,7 @@ class MatchingService:
         self.db = get_supabase_client()
         self._products_cache = None
         self._mappings_cache = {}
+        self._mappings_lock = Lock()  # Thread safety для _mappings_cache
         self._embedding_matcher = get_embedding_matcher()
         self._stats = {
             'total': 0,
@@ -475,26 +477,29 @@ class MatchingService:
         return self._products_cache
 
     def _load_client_mappings(self, client_id: UUID | None) -> dict:
-        """Загрузка маппингов клиента"""
+        """Загрузка маппингов клиента (thread-safe)"""
         if client_id is None:
             return {}  # Без client_id возвращаем пустой словарь
         client_key = str(client_id)
-        if client_key not in self._mappings_cache:
-            response = self.db.table('mappings')\
-                .select('client_sku, product_id, confidence, match_type')\
-                .eq('client_id', str(client_id))\
-                .eq('verified', True)\
-                .execute()
-            self._mappings_cache[client_key] = {
-                normalize_sku(m['client_sku']): m
-                for m in (response.data or [])
-            }
-        return self._mappings_cache[client_key]
+        # Thread-safe доступ к кэшу маппингов
+        with self._mappings_lock:
+            if client_key not in self._mappings_cache:
+                response = self.db.table('mappings')\
+                    .select('client_sku, product_id, confidence, match_type')\
+                    .eq('client_id', str(client_id))\
+                    .eq('verified', True)\
+                    .execute()
+                self._mappings_cache[client_key] = {
+                    normalize_sku(m['client_sku']): m
+                    for m in (response.data or [])
+                }
+            return self._mappings_cache[client_key]
 
     def clear_cache(self):
-        """Очистка кэша"""
+        """Очистка кэша (thread-safe)"""
         self._products_cache = None
-        self._mappings_cache = {}
+        with self._mappings_lock:
+            self._mappings_cache = {}
 
     def get_stats(self) -> dict:
         """Получить статистику matching"""
