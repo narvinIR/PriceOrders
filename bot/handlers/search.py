@@ -1,6 +1,7 @@
 """
 Обработчик интерактивного поиска товаров.
 """
+import time
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
@@ -11,8 +12,17 @@ from bot.handlers.upload import get_matcher
 
 router = Router()
 
-# Временное хранилище результатов поиска
-_search_results = {}
+# Временное хранилище результатов поиска: {search_id: (data, timestamp)}
+_search_results: dict[str, tuple[dict, float]] = {}
+_SEARCH_TTL = 3600  # 1 час TTL
+
+
+def _cleanup_search_results():
+    """Удаляем устаревшие результаты поиска (TTL 1 час)"""
+    now = time.time()
+    expired = [k for k, (_, ts) in _search_results.items() if now - ts > _SEARCH_TTL]
+    for k in expired:
+        del _search_results[k]
 
 
 @router.message(Command("search"))
@@ -50,14 +60,15 @@ async def cmd_search(message: Message):
             )
             return
 
-        # Сохраняем результат для callback
-        search_id = str(uuid4())[:8]
-        _search_results[search_id] = {
+        # Сохраняем результат для callback (full UUID + timestamp)
+        _cleanup_search_results()  # Очищаем устаревшие
+        search_id = str(uuid4())  # Full UUID (не [:8] - избегаем коллизий)
+        _search_results[search_id] = ({
             'client_id': client_id,
             'client_sku': query,
             'product_id': str(result.product_id),
             'product_sku': result.product_sku,
-        }
+        }, time.time())
 
         # Формируем ответ
         confidence_emoji = "✅" if result.confidence >= 95 else "⚠️" if result.confidence >= 75 else "❓"
@@ -95,7 +106,7 @@ async def callback_confirm(callback: CallbackQuery):
         await callback.answer("⏰ Результат устарел, повторите поиск")
         return
 
-    data = _search_results.pop(search_id)
+    data, _ = _search_results.pop(search_id)  # Извлекаем data из tuple (data, timestamp)
 
     # TODO: Сохранить маппинг в Supabase
     await callback.message.edit_text(

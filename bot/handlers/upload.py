@@ -9,6 +9,7 @@ import re
 import logging
 import tempfile
 from datetime import datetime
+from uuid import uuid4
 from aiogram import Router, F, Bot
 from aiogram.types import Message, FSInputFile
 import pandas as pd
@@ -35,14 +36,14 @@ def get_matcher():
     return _matcher
 
 
-def _match_single_item(matcher, item: dict) -> dict:
+def _match_single_item(matcher, item: dict, session_id=None) -> dict:
     """Обработка одного товара (для параллельного запуска)."""
     client_sku = item.get('sku', '')
     client_name = item.get('name', '')
     qty = item.get('qty', 1)
 
     result = matcher.match_item(
-        client_id=None,
+        client_id=session_id,  # Используем session_id для кэширования маппингов
         client_sku=client_sku,
         client_name=client_name or client_sku
     )
@@ -85,12 +86,35 @@ async def _process_items_parallel(items: list) -> tuple[list, int, int]:
     """
     matcher = get_matcher()
 
+    # Генерируем session_id для кэширования маппингов в рамках сессии
+    session_id = uuid4()
+
     # Запускаем все товары параллельно
     tasks = [
-        asyncio.to_thread(_match_single_item, matcher, item)
+        asyncio.to_thread(_match_single_item, matcher, item, session_id)
         for item in items
     ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Таймаут 60 сек чтобы не зависать на webhook
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=60.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("⏰ Timeout при обработке заказа (60 сек)")
+        # Возвращаем частичные результаты
+        results = [
+            {'Запрос': item.get('sku', '') or item.get('name', ''),
+             'Артикул Jakko': '⏰ TIMEOUT',
+             'Название Jakko': 'Превышено время обработки',
+             'Кол-во': item.get('qty', 1),
+             'Упаковка': 1,
+             'Точность': '0%',
+             'Метод': 'timeout',
+             '_matched': False}
+            for item in items
+        ]
 
     # Фильтруем исключения
     valid_results = []
