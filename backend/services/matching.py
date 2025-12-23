@@ -316,10 +316,17 @@ def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
                         and ps[0] == outer1 and inner in ps]
             return filtered if filtered else matches
 
-        # Для 2 размеров - точное совпадение (БЕЗ fallback!)
+        # Для 2 размеров - точное совпадение, с fallback по первому размеру
         filtered = [m for m in matches
                     if extract_fitting_size(get_product(m)['name']) == client_size]
-        return filtered  # Не возвращаем все matches если нет совпадения!
+        if filtered:
+            return filtered
+        # Fallback: ищем по первому размеру (50-32 → 50-50, 50-40)
+        first_size = client_size[0]
+        filtered = [m for m in matches
+                    if (ps := extract_fitting_size(get_product(m)['name']))
+                    and ps[0] == first_size]
+        return filtered if filtered else matches
 
     # Если клиент указал 1 размер (110) - ищем товары с ОДНИМ размером или одинаковыми
     single_size = client_size[0]
@@ -534,21 +541,6 @@ class MatchingService:
         norm_sku = normalize_sku(client_sku)
         norm_name = normalize_name(client_name) if client_name else ""
 
-        # Level 3: Проверяем кэшированный маппинг (приоритет)
-        if norm_sku in mappings:
-            mapping = mappings[norm_sku]
-            product = next((p for p in products if str(p['id']) == str(mapping['product_id'])), None)
-            if product:
-                return self._finalize_match(MatchResult(
-                    product_id=UUID(product['id']),
-                    product_sku=product['sku'],
-                    product_name=product['name'],
-                    confidence=settings.confidence_exact_sku,
-                    match_type="cached_mapping",
-                    needs_review=False,
-                    pack_qty=product.get('pack_qty', 1)
-                ))
-
         # Level 1: Точное совпадение артикула
         for product in products:
             if normalize_sku(product['sku']) == norm_sku:
@@ -575,6 +567,22 @@ class MatchingService:
                         needs_review=False,
                         pack_qty=product.get('pack_qty', 1)
                     ))
+
+        # Level 3: Кэшированный маппинг (ПОСЛЕ точных совпадений!)
+        # Ранее был первым - это могло переопределить правильные точные совпадения
+        if norm_sku in mappings:
+            mapping = mappings[norm_sku]
+            product = next((p for p in products if str(p['id']) == str(mapping['product_id'])), None)
+            if product:
+                return self._finalize_match(MatchResult(
+                    product_id=UUID(product['id']),
+                    product_sku=product['sku'],
+                    product_name=product['name'],
+                    confidence=settings.confidence_exact_sku,
+                    match_type="cached_mapping",
+                    needs_review=False,
+                    pack_qty=product.get('pack_qty', 1)
+                ))
 
         # Level 4: Fuzzy SKU (Levenshtein distance ≤ 1)
         best_sku_match = None
@@ -774,14 +782,32 @@ class MatchingService:
                     None
                 )
                 if product:
-                    # Post-validation: проверяем размер трубы
+                    # Post-validation: проверяем размеры
+                    # 1. Размер трубы (110×2000 ≠ 110×3000)
                     client_size = extract_pipe_size(client_name)
                     if client_size:
                         product_size = extract_pipe_size(product['name'])
                         if product_size and product_size != client_size:
-                            # Размеры не совпадают - ищем правильный товар
-                            logger.debug(f"LLM size mismatch: {client_size} vs {product_size}")
-                            product = None  # Отклоняем LLM результат
+                            logger.debug(f"LLM L7 pipe size mismatch: {client_size} vs {product_size}")
+                            product = None
+
+                    # 2. Размер фитинга (муфта 25 ≠ муфта 50)
+                    if product:
+                        client_fitting = extract_fitting_size(client_name)
+                        if client_fitting:
+                            product_fitting = extract_fitting_size(product['name'])
+                            if product_fitting and product_fitting != client_fitting:
+                                logger.debug(f"LLM L7 fitting size mismatch: {client_fitting} vs {product_fitting}")
+                                product = None
+
+                    # 3. Размер резьбы (32×1" ≠ 25×3/4")
+                    if product:
+                        client_thread = extract_thread_size(client_name)
+                        if client_thread:
+                            product_thread = extract_thread_size(product['name'])
+                            if product_thread and product_thread != client_thread:
+                                logger.debug(f"LLM L7 thread size mismatch: {client_thread} vs {product_thread}")
+                                product = None
 
                 if product:
                     conf = float(result.get("confidence", 70))
