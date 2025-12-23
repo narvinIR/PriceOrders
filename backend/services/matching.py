@@ -626,6 +626,12 @@ class MatchingService:
                     if product_thread and product_thread != client_thread_size:
                         continue
 
+                # Проверка размера фитинга (муфта 25 ≠ муфта 50)
+                if client_fitting_size:
+                    product_fitting = extract_fitting_size(product['name'])
+                    if product_fitting and product_fitting != client_fitting_size:
+                        continue
+
                 prod_norm_name = normalize_name(product['name'])
                 ratio = max(
                     fuzz.token_sort_ratio(norm_name, prod_norm_name),
