@@ -418,13 +418,24 @@ def extract_mm_from_clamp(client_name: str) -> int | None:
     name = client_name.lower()
     if 'хомут' not in name:
         return None
-    # Паттерны: "хомут 110", "хомут в комплекте 110"
-    m = re.search(r'\bхомут\s+(?:в\s+комплекте\s+)?(\d+)\b', name)
-    if m:
-        mm = int(m.group(1))
-        # Валидация: размеры хомутов 15-200мм
-        if 15 <= mm <= 200:
-            return mm
+    # Паттерны:
+    # - "хомут 110"
+    # - "хомут в комплекте 110"
+    # - "хомут для трубы 110"
+    # - "хомут 110мм"
+    # - "хомут ∅110" или "хомут d110"
+    patterns = [
+        r'\bхомут\s+(?:в\s+комплекте\s+)?(\d+)',
+        r'\bхомут\s+(?:для\s+)?(?:труб\w*\s+)?(\d+)',
+        r'\bхомут\s*[∅dд]?\s*(\d+)',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, name)
+        if m:
+            mm = int(m.group(1))
+            # Валидация: размеры хомутов 15-200мм
+            if 15 <= mm <= 200:
+                return mm
     return None
 
 

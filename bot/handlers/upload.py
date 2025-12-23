@@ -60,6 +60,7 @@ def _match_single_item(matcher, item: dict, session_id=None) -> dict:
             'Запрос': client_sku or client_name,
             'Артикул Jakko': result.product_sku,
             'Название Jakko': result.product_name,
+            'Исх. кол-во': qty,  # Исходное количество клиента
             'Кол-во': total_qty,
             'Упаковка': pack_qty,
             'Точность': f"{result.confidence:.0f}%",
@@ -71,6 +72,7 @@ def _match_single_item(matcher, item: dict, session_id=None) -> dict:
             'Запрос': client_sku or client_name,
             'Артикул Jakko': '❌ НЕ НАЙДЕНО',
             'Название Jakko': '',
+            'Исх. кол-во': qty,
             'Кол-во': qty,
             'Упаковка': 1,
             'Точность': '0%',
@@ -180,33 +182,36 @@ async def process_items(message: Message, items: list):
     with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
         tmp_path = tmp.name
 
-    # Сохраняем с форматированием
-    with pd.ExcelWriter(tmp_path, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Заказ')
-        worksheet = writer.sheets['Заказ']
-        # Ширина колонок
-        worksheet.column_dimensions['A'].width = 25
-        worksheet.column_dimensions['B'].width = 15
-        worksheet.column_dimensions['C'].width = 50
-        worksheet.column_dimensions['D'].width = 10
-        worksheet.column_dimensions['E'].width = 10
-        worksheet.column_dimensions['F'].width = 10
-        worksheet.column_dimensions['G'].width = 15
+    try:
+        # Сохраняем с форматированием
+        with pd.ExcelWriter(tmp_path, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Заказ')
+            worksheet = writer.sheets['Заказ']
+            # Ширина колонок
+            worksheet.column_dimensions['A'].width = 25  # Запрос
+            worksheet.column_dimensions['B'].width = 15  # Артикул
+            worksheet.column_dimensions['C'].width = 50  # Название
+            worksheet.column_dimensions['D'].width = 10  # Исх. кол-во
+            worksheet.column_dimensions['E'].width = 10  # Кол-во
+            worksheet.column_dimensions['F'].width = 10  # Упаковка
+            worksheet.column_dimensions['G'].width = 10  # Точность
+            worksheet.column_dimensions['H'].width = 15  # Метод
 
-    # Отправляем файл
-    logger.info("📤 Отправляю результат...")
-    await message.answer(
-        f"✅ <b>Готово!</b>\n\n"
-        f"📦 Найдено: {matched} из {len(items)}\n"
-        f"❌ Не найдено: {not_found}"
-    )
+        # Отправляем файл
+        logger.info("📤 Отправляю результат...")
+        await message.answer(
+            f"✅ <b>Готово!</b>\n\n"
+            f"📦 Найдено: {matched} из {len(items)}\n"
+            f"❌ Не найдено: {not_found}"
+        )
 
-    doc = FSInputFile(tmp_path, filename=filename)
-    await message.answer_document(doc, caption="📎 Ваш заказ готов")
-    logger.info("✅ Файл отправлен!")
-
-    # Удаляем временный файл
-    os.unlink(tmp_path)
+        doc = FSInputFile(tmp_path, filename=filename)
+        await message.answer_document(doc, caption="📎 Ваш заказ готов")
+        logger.info("✅ Файл отправлен!")
+    finally:
+        # Удаляем временный файл
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @router.message(F.photo)
@@ -312,16 +317,21 @@ async def handle_document(message: Message, bot: Bot):
 
         # Парсим файл
         if filename.endswith('.csv'):
-            # Пробуем разные разделители
-            for sep in [';', ',', '\t']:
-                try:
-                    df = pd.read_csv(tmp_path, sep=sep)
-                    if len(df.columns) > 1:
-                        break
-                except Exception:
-                    continue
-            else:
-                df = pd.read_csv(tmp_path)
+            # Пробуем разные encoding и разделители
+            encodings = ['utf-8', 'cp1251', 'utf-8-sig', 'latin-1']
+            df = None
+            for enc in encodings:
+                for sep in [';', ',', '\t']:
+                    try:
+                        df = pd.read_csv(tmp_path, sep=sep, encoding=enc)
+                        if len(df.columns) > 1:
+                            break
+                    except Exception:
+                        continue
+                if df is not None and len(df.columns) > 1:
+                    break
+            if df is None:
+                df = pd.read_csv(tmp_path)  # fallback
         else:
             df = pd.read_excel(tmp_path)
 
