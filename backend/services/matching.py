@@ -18,11 +18,16 @@ logger = logging.getLogger(__name__)
 def detect_client_category(client_name: str) -> str | None:
     """
     Определить категорию из запроса клиента.
-    Returns: 'prestige', 'outdoor', 'ppr', 'sewer', или None
+    Returns: 'pnd', 'prestige', 'outdoor', 'ppr', 'sewer', или None
     """
     name = client_name.lower()
 
     is_sewer = any(x in name for x in ['кан', 'канализац', 'сантех'])
+
+    # ПНД (полиэтилен, компрессионные фитинги) - артикулы 704...
+    # ВАЖНО: проверять ДО ППР, т.к. оба для водопровода!
+    if any(x in name for x in ['пнд', 'hdpe', 'компресс', 'цанг']):
+        return 'pnd'
 
     # Малошумная/Prestige = белая канализация (403)
     if any(x in name for x in ['малошум', 'prestige']):
@@ -132,7 +137,12 @@ def filter_by_category(matches: list, client_cat: str | None) -> list:
         return m[0] if is_tuple else m
 
     filtered = None
-    if client_cat == 'prestige':
+    if client_cat == 'pnd':
+        # ПНД - артикулы 704xxx (компрессионные фитинги)
+        filtered = [m for m in matches
+                    if get_product(m).get('sku', '').startswith('704')
+                    or 'компресс' in get_product(m)['name'].lower()]
+    elif client_cat == 'prestige':
         filtered = [m for m in matches
                     if 'малошум' in get_product(m).get('category', '').lower()
                     or 'prestige' in get_product(m)['name'].lower()]
@@ -604,10 +614,16 @@ class MatchingService:
             # Собираем все совпадения выше порога
             matches = []
             for product in products:
-                # Проверка точного размера (если указан)
+                # Проверка точного размера труб (если указан)
                 if client_size:
                     product_size = extract_pipe_size(product['name'])
                     if product_size and product_size != client_size:
+                        continue
+
+                # Проверка размера резьбы (25x1" ≠ 20x1/2")
+                if client_thread_size:
+                    product_thread = extract_thread_size(product['name'])
+                    if product_thread and product_thread != client_thread_size:
                         continue
 
                 prod_norm_name = normalize_name(product['name'])
