@@ -718,12 +718,18 @@ class MatchingService:
                 # более высокий score и вытеснить правильный.
                 client_thread = extract_thread_type(client_name or "")
 
-                # Фильтр по типу товара - применяем ко всем
+                # Фильтр по типу товара - ЖЁСТКИЙ для критических типов
+                # Кран НИКОГДА не должен совпадать с Отводом, Муфта с Тройником и т.д.
+                CRITICAL_TYPES = {"кран", "муфта", "отвод", "тройник", "переходник", "заглушка", "ревизия", "крестовина"}
                 if client_type:
                     type_filtered = [m for m in matches
                                      if extract_product_type(m[0]['name']) == client_type]
                     if type_filtered:
                         matches = type_filtered
+                    elif client_type in CRITICAL_TYPES:
+                        # Тип критичен и не найден в каталоге - НЕ возвращать ложный результат
+                        logger.debug(f"Тип '{client_type}' критичен, но не найден в matches - пропускаем fuzzy")
+                        matches = []
 
                 # Фильтр по углу - применяем ко всем (с нормализацией 90° → 87°)
                 if client_angle:
