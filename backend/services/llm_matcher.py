@@ -161,11 +161,12 @@ class LLMMatcher:
                         },
                         {
                             "role": "user",
-                            "content": f"Найди товар: {query}"
+                            "content": f"Найди товар: {query}\n\nВерни ТОЛЬКО JSON без пояснений."
                         }
                     ],
                     "temperature": 0,
                     "max_tokens": 200,
+                    "response_format": {"type": "json_object"},
                 },
                 timeout=30.0
             )
