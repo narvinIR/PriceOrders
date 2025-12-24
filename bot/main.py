@@ -26,6 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Диагностика при старте
+logger.info(f"🔧 Config: WEBHOOK_MODE={WEBHOOK_MODE}, WEBHOOK_URL={WEBHOOK_URL}")
+
 # Дедупликация webhook запросов (update_id → timestamp)
 # Telegram повторяет webhook если не получает 200 OK быстро
 _processed_updates: OrderedDict[int, float] = OrderedDict()
