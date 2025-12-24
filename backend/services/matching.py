@@ -24,6 +24,7 @@ def detect_client_category(client_name: str) -> str | None:
     name = client_name.lower()
 
     is_sewer = any(x in name for x in ['кан', 'канализац', 'сантех'])
+    is_gray = 'сер' in name  # серый/серая = канализация
 
     # PERT (полиэтилен термостойкий) - артикулы 501...
     # ВАЖНО: проверять ДО ПНД и ППР!
@@ -46,7 +47,12 @@ def detect_client_category(client_name: str) -> str | None:
     if any(x in name for x in ['нар кан', 'нар.кан', 'наружн', 'рыж']):
         return 'outdoor'
 
-    # ППР (водопровод/отопление) - белый, но НЕ канализация
+    # Серая канализация - РАНЬШЕ ППР! (202)
+    # ПП серая = канализация, не водопровод
+    if is_gray or is_sewer:
+        return 'sewer'
+
+    # ППР (водопровод/отопление) - белый, но НЕ канализация и НЕ серый
     # "ПП" = полипропилен = ППР
     if any(x in name for x in ['ппр', 'ppr', 'водопровод', 'отоплен', ' пп ', 'пп ']):
         return 'ppr'
@@ -55,10 +61,6 @@ def detect_client_category(client_name: str) -> str | None:
         return 'ppr'
     if 'бел' in name and not is_sewer:
         return 'ppr'
-
-    # Обычная серая канализация (202)
-    if is_sewer or 'сер' in name:
-        return 'sewer'
 
     return None  # Не указано - дефолт: обычная серая кан.
 
@@ -133,7 +135,7 @@ def filter_by_category(matches: list, client_cat: str | None) -> list:
     Фильтрует список совпадений по категории.
     matches: список (product, score) или просто product dicts
     """
-    if not matches or len(matches) <= 1:
+    if not matches:
         return matches
 
     # Определяем формат: (product, score) или просто product
@@ -168,15 +170,22 @@ def filter_by_category(matches: list, client_cat: str | None) -> list:
         filtered = [m for m in matches
                     if 'ппр' in get_product(m).get('category', '').lower()
                     or 'ппр' in get_product(m)['name'].lower()]
+    elif client_cat == 'sewer':
+        # СЕРАЯ канализация (202) - НЕ рифленые, НЕ Prestige, НЕ наружная
+        # Строгий фильтр - возвращаем пустой список если нет подходящих
+        return [m for m in matches
+                if get_product(m).get('sku', '').startswith('202')
+                or ('серый' in get_product(m)['name'].lower()
+                    and 'рифлен' not in get_product(m)['name'].lower())]
     else:
-        # Дефолт: обычная СЕРАЯ канализация (202) - исключаем Prestige и наружную
+        # Дефолт: обычная СЕРАЯ канализация (202)
         # Приоритет 1: SKU начинается с 202 (серая канализация)
         sku_202 = [m for m in matches
                    if get_product(m).get('sku', '').startswith('202')]
         if sku_202:
             return sku_202
 
-        # Приоритет 2: Категория "канализация" (не малошум/наружная) или "серый" в названии
+        # Приоритет 2: Категория "канализация" (не малошум/наружная)
         filtered = [m for m in matches
                     if ('канализац' in get_product(m).get('category', '').lower()
                         and 'малошум' not in get_product(m).get('category', '').lower()
@@ -392,6 +401,31 @@ def filter_by_thread_size(matches: list, client_thread: tuple | None) -> list:
             f'{mm}×{inches}"' in name or
             f'{mm}*{inches}"' in name or
             f'{mm}-{inches}"' in name):
+            filtered.append(m)
+
+    return filtered if filtered else matches
+
+
+def filter_by_clamp_size(matches: list, client_mm: int | None) -> list:
+    """
+    Фильтрует хомуты по размеру в мм.
+
+    client_mm: размер в мм (50, 110 и т.д.)
+    Хомут подходит если диапазон (87-92) включает client_mm
+    """
+    if not matches or not client_mm or len(matches) <= 1:
+        return matches
+
+    is_tuple = isinstance(matches[0], tuple)
+
+    def get_product(m):
+        return m[0] if is_tuple else m
+
+    filtered = []
+    for m in matches:
+        name = get_product(m)['name']
+        # Проверяем подходит ли хомут по диапазону
+        if clamp_fits_mm(name, client_mm):
             filtered.append(m)
 
     return filtered if filtered else matches
@@ -854,7 +888,7 @@ class MatchingService:
         # Fallback: Semantic embedding (если LLM недоступен)
         if self._embedding_matcher.is_ready and client_name:
             results = self._embedding_matcher.search(
-                client_name, top_k=20, min_score=0.4
+                client_name, top_k=20, min_score=0.55
             )
             if results:
                 client_cat = detect_client_category(client_name)
@@ -865,6 +899,7 @@ class MatchingService:
                 client_thread_size = extract_thread_size(client_name)
                 client_is_detachable = is_coupling_detachable(client_name)
                 client_is_reducer = is_reducer(client_name)
+                client_clamp_mm = extract_mm_from_clamp(client_name)
 
                 filtered = filter_by_product_type(results, client_type)
                 filtered = filter_by_angle(filtered, client_angle)
@@ -874,6 +909,7 @@ class MatchingService:
                 filtered = filter_by_category(filtered, client_cat)
                 filtered = filter_by_fitting_size(filtered, client_fitting_size)
                 filtered = filter_by_thread_size(filtered, client_thread_size)
+                filtered = filter_by_clamp_size(filtered, client_clamp_mm)
 
                 if filtered:
                     product, score = filtered[0]

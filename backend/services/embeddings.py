@@ -1,14 +1,34 @@
 """
 Embedding-based semantic matching service.
-Level 7 в алгоритме маппинга - семантическое сходство через ML.
+Level 7 в алгоритме маппинга - семантическое сходство через pgvector.
+
+v5.0: Заменён FAISS на pgvector (embeddings хранятся в PostgreSQL)
+v5.1: Усиление типа товара в embeddings для лучшего matching
 """
-import numpy as np
+import logging
 from typing import Optional
 from backend.utils.normalizers import normalize_name
+from backend.models.database import get_supabase_client
 
-# Ленивая загрузка тяжёлых зависимостей
+logger = logging.getLogger(__name__)
+
+
+def prepare_embedding_text(name: str) -> str:
+    """
+    Подготовка текста для embedding с усилением типа товара.
+    Тип товара добавляется дважды для повышения его веса.
+    """
+    # Lazy import to avoid circular dependency
+    from backend.services.matching import extract_product_type
+
+    norm = normalize_name(name)
+    product_type = extract_product_type(name)
+    if product_type:
+        return f"{product_type} {product_type} {norm}"
+    return norm
+
+# Ленивая загрузка модели
 _model = None
-_faiss = None
 
 
 def _get_model():
@@ -20,57 +40,28 @@ def _get_model():
     return _model
 
 
-def _get_faiss():
-    """Ленивая загрузка faiss"""
-    global _faiss
-    if _faiss is None:
-        import faiss
-        _faiss = faiss
-    return _faiss
-
-
 class EmbeddingMatcher:
-    """Семантический поиск товаров через embeddings"""
+    """Семантический поиск товаров через pgvector (PostgreSQL)"""
 
     def __init__(self):
-        self.index: Optional[object] = None
-        self.products: list[dict] = []
-        self.embeddings: Optional[np.ndarray] = None
-        self._initialized = False
+        self.db = get_supabase_client()
+        self._initialized = True  # pgvector всегда готов
 
     def build_index(self, products: list[dict]) -> None:
         """
-        Построение FAISS индекса для быстрого поиска.
-        Вызывать при загрузке/обновлении каталога.
+        DEPRECATED: Индекс теперь в PostgreSQL (HNSW).
+        Метод оставлен для совместимости, ничего не делает.
         """
-        if not products:
-            return
+        pass
 
-        model = _get_model()
-        faiss = _get_faiss()
-
-        # Нормализуем названия перед кодированием
-        names = [normalize_name(p.get('name', '')) for p in products]
-
-        # Создаём embeddings
-        embeddings = model.encode(
-            names,
-            normalize_embeddings=True,
-            show_progress_bar=False
-        )
-
-        # Строим FAISS индекс (Inner Product = косинусное сходство для нормализованных векторов)
-        dimension = embeddings.shape[1]
-        self.index = faiss.IndexFlatIP(dimension)
-        self.index.add(embeddings.astype('float32'))
-
-        self.products = products
-        self.embeddings = embeddings
-        self._initialized = True
-
-    def search(self, query: str, top_k: int = 5, min_score: float = 0.5) -> list[tuple[dict, float]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        min_score: float = 0.5
+    ) -> list[tuple[dict, float]]:
         """
-        Семантический поиск товаров.
+        Семантический поиск товаров через pgvector.
 
         Args:
             query: Текст запроса (название товара)
@@ -80,38 +71,51 @@ class EmbeddingMatcher:
         Returns:
             Список (product, score) отсортированный по убыванию сходства
         """
-        if not self._initialized or not self.index:
+        # Используем тот же формат что и при генерации embeddings
+        embedding_text = prepare_embedding_text(query)
+        if not embedding_text:
             return []
 
         model = _get_model()
 
-        # Нормализуем запрос
-        norm_query = normalize_name(query)
-        if not norm_query:
-            return []
-
-        # Кодируем запрос
+        # Генерируем embedding для запроса
         query_embedding = model.encode(
-            [norm_query],
+            embedding_text,
             normalize_embeddings=True,
             show_progress_bar=False
-        )
+        ).tolist()
 
-        # Поиск ближайших соседей
-        scores, indices = self.index.search(
-            query_embedding.astype('float32'),
-            min(top_k, len(self.products))
-        )
+        # Вызываем RPC функцию match_products в PostgreSQL
+        try:
+            result = self.db.rpc('match_products', {
+                'query_embedding': query_embedding,
+                'match_threshold': min_score,
+                'match_count': top_k
+            }).execute()
 
-        # Фильтруем по минимальному порогу
-        results = []
-        for i, (idx, score) in enumerate(zip(indices[0], scores[0])):
-            if idx >= 0 and score >= min_score:
-                results.append((self.products[idx], float(score)))
+            # Преобразуем результат в формат (product, score)
+            matches = []
+            for row in result.data:
+                product = {
+                    'id': row['id'],
+                    'sku': row['sku'],
+                    'name': row['name'],
+                    'category': row.get('category'),
+                    'pack_qty': row.get('pack_qty', 1),
+                }
+                matches.append((product, row['similarity']))
 
-        return results
+            return matches
 
-    def get_best_match(self, query: str, min_score: float = 0.6) -> Optional[tuple[dict, float]]:
+        except Exception as e:
+            logger.error(f"pgvector search error: {e}")
+            return []
+
+    def get_best_match(
+        self,
+        query: str,
+        min_score: float = 0.6
+    ) -> Optional[tuple[dict, float]]:
         """
         Получить лучшее совпадение.
 
@@ -127,8 +131,8 @@ class EmbeddingMatcher:
 
     @property
     def is_ready(self) -> bool:
-        """Проверка готовности индекса"""
-        return self._initialized and self.index is not None
+        """pgvector всегда готов (индекс в БД)"""
+        return True
 
 
 # Singleton для использования во всём приложении
