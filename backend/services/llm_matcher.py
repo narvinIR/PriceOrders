@@ -105,7 +105,7 @@ def _get_system_prompt() -> str:
 class LLMMatcher:
     """Matching товаров через LLM API (OpenRouter)"""
 
-    def __init__(self, api_key: str, model: str = "moonshotai/kimi-k2-thinking"):
+    def __init__(self, api_key: str, model: str = "moonshotai/kimi-k2"):
         self.api_key = api_key
         self.model = model
         self.products_cache: Optional[str] = None
