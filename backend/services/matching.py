@@ -816,6 +816,12 @@ class MatchingService:
                                     if product_size and product_size != client_fitting_size:
                                         logger.debug(f"LLM L6 size mismatch: {client_fitting_size} vs {product_size}")
                                         llm_product = None
+                                # Валидация типа товара (кран ≠ отвод, заглушка ≠ муфта)
+                                if llm_product and client_type and client_type in CRITICAL_TYPES:
+                                    product_t = extract_product_type(llm_product['name'])
+                                    if product_t and product_t != client_type:
+                                        logger.debug(f"LLM L6 type mismatch: {client_type} vs {product_t}")
+                                        llm_product = None
                                 if llm_product:
                                     return self._finalize_match(MatchResult(
                                         product_id=UUID(llm_product['id']),
@@ -877,6 +883,16 @@ class MatchingService:
                             product_thread = extract_thread_size(product['name'])
                             if product_thread and product_thread != client_thread:
                                 logger.debug(f"LLM L7 thread size mismatch: {client_thread} vs {product_thread}")
+                                product = None
+
+                    # 4. Тип товара - КРИТИЧЕН (кран ≠ отвод, заглушка ≠ муфта)
+                    if product:
+                        CRITICAL_TYPES = {"кран", "муфта", "отвод", "тройник", "переходник", "заглушка", "ревизия", "крестовина"}
+                        client_type = extract_product_type(client_name)
+                        if client_type and client_type in CRITICAL_TYPES:
+                            product_type = extract_product_type(product['name'])
+                            if product_type and product_type != client_type:
+                                logger.debug(f"LLM L7 type mismatch: {client_type} vs {product_type}")
                                 product = None
 
                 if product:
