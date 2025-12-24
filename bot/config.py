@@ -29,9 +29,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     logger.warning("⚠️ Supabase credentials not set - database features disabled")
 
-# Режим работы
-WEBHOOK_MODE = os.getenv("WEBHOOK_MODE", "false").lower() == "true"
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
+# Режим работы (default=true для Northflank)
+WEBHOOK_MODE = os.getenv("WEBHOOK_MODE", "true").lower() == "true"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://jakko--priceorders-bot--kbhsjrb6n8tm.code.run")
 WEBHOOK_PATH = "/webhook/telegram"
 
 # Сервер
