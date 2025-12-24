@@ -97,14 +97,14 @@ async def _process_items_parallel(items: list) -> tuple[list, int, int]:
         for item in items
     ]
 
-    # Таймаут 60 сек чтобы не зависать на webhook
+    # Таймаут 180 сек (LLM matching ~3 сек на позицию)
     try:
         results = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
-            timeout=60.0
+            timeout=180.0
         )
     except asyncio.TimeoutError:
-        logger.error("⏰ Timeout при обработке заказа (60 сек)")
+        logger.error("⏰ Timeout при обработке заказа (180 сек)")
         # Возвращаем частичные результаты
         results = [
             {'Запрос': item.get('sku', '') or item.get('name', ''),
