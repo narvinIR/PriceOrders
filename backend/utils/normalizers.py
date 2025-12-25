@@ -213,6 +213,11 @@ def normalize_name(name: str) -> str:
     # × нужен для размеров (25×1/2), / нужен для дробей резьбы (1/2, 3/4)
     result = re.sub(r'[^\w\s×/]', ' ', result)
     result = ' '.join(result.split())
+    # Для компрессионных фитингов убираем "полиэтилен" - они все ПНД по умолчанию
+    # Каталог: "Тройник компрессионный 20" (без "полиэтилен")
+    if 'компрессионн' in result:
+        result = re.sub(r'\bполиэтилен\b', '', result)
+        result = ' '.join(result.split())
     return result
 
 def extract_numeric_sku(sku: str) -> str:
