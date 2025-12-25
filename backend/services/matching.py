@@ -59,6 +59,9 @@ def detect_client_category(client_name: str) -> str | None:
     # Армированная труба = ППР (не канализация!)
     if any(x in name for x in ['армир', 'арм.', 'арм ']):
         return 'ppr'
+    # Переходники ВН/НР = только ППР (водопровод)
+    if any(x in name for x in ['вн/нр', 'вн нр', 'пн/нр']):
+        return 'ppr'
     if 'бел' in name and not is_sewer:
         return 'ppr'
 
