@@ -323,7 +323,8 @@ def extract_thread_size(name: str) -> tuple[int, str] | None:
     # Паттерн: число 20-63 * дюймы
     # Дюймы резьбы: 1/2, 3/4, 1, 1 1/4, 1 1/2, 2 (не 20, 25, 32, 40!)
     # Паттерн: мм * (дробь ИЛИ маленькое число 1-2)
-    m = re.search(r'\b(\d{2})\s*[*xх×]\s*(\d/\d|\d\s+\d/\d|\d)\b', name)
+    # Разделители: *, x, X, х, Х, × (латиница и кириллица, любой регистр)
+    m = re.search(r'\b(\d{2})\s*[*xXхХ×]\s*(\d/\d|\d\s+\d/\d|\d)\b', name)
     if m:
         mm = int(m.group(1))
         inches = m.group(2).replace(' ', '')

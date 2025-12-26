@@ -298,8 +298,12 @@ def extract_thread_type(name: str) -> str | None:
 
 
 def filter_by_thread(matches: list, client_thread: str | None) -> list:
-    """Фильтрует по типу резьбы (внутренняя/наружная)"""
-    if not matches or not client_thread or len(matches) <= 1:
+    """
+    ЖЁСТКИЙ фильтр по типу резьбы (внутренняя/наружная).
+    Если клиент указал тип резьбы - возвращаем ТОЛЬКО товары с этим типом.
+    НЕ возвращаем товары с неправильным типом резьбы!
+    """
+    if not matches or not client_thread:
         return matches
 
     is_tuple = isinstance(matches[0], tuple)
@@ -310,7 +314,8 @@ def filter_by_thread(matches: list, client_thread: str | None) -> list:
     filtered = [m for m in matches
                 if extract_thread_type(get_product(m)['name']) == client_thread]
 
-    return filtered if filtered else matches
+    # ЖЁСТКИЙ фильтр - НЕ возвращаем товары с неправильной резьбой!
+    return filtered
 
 
 def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
@@ -385,11 +390,12 @@ def filter_by_fitting_size(matches: list, client_size: tuple | None) -> list:
 
 def filter_by_thread_size(matches: list, client_thread: tuple | None) -> list:
     """
-    Фильтрует по размеру резьбы (32×1", 25×3/4" и т.д.)
+    ЖЁСТКИЙ фильтр по размеру резьбы (32×1", 25×3/4" и т.д.)
+    Если клиент указал размер резьбы - возвращаем ТОЛЬКО товары с этим размером.
 
     client_thread: (мм, дюймы) - например (32, "1")
     """
-    if not matches or not client_thread or len(matches) <= 1:
+    if not matches or not client_thread:
         return matches
 
     is_tuple = isinstance(matches[0], tuple)
@@ -410,7 +416,8 @@ def filter_by_thread_size(matches: list, client_thread: tuple | None) -> list:
             f'{mm}-{inches}"' in name):
             filtered.append(m)
 
-    return filtered if filtered else matches
+    # ЖЁСТКИЙ фильтр - НЕ возвращаем товары с неправильным размером резьбы!
+    return filtered
 
 
 def filter_by_clamp_size(matches: list, client_mm: int | None) -> list:
@@ -818,6 +825,18 @@ class MatchingService:
                                 (p for p in products if p["sku"] == llm_result["sku"]),
                                 None
                             )
+                            # Валидация типа товара (отвод ≠ муфта, кран ≠ тройник)
+                            if llm_product and client_type and client_type in CRITICAL_TYPES:
+                                llm_type = extract_product_type(llm_product['name'])
+                                if llm_type and llm_type != client_type:
+                                    logger.warning(f"LLM вернул неправильный тип: '{llm_type}' != '{client_type}'")
+                                    llm_product = None
+                            # Валидация типа резьбы (вн ≠ нар)
+                            if llm_product and client_thread:
+                                llm_thread = extract_thread_type(llm_product['name'])
+                                if llm_thread and llm_thread != client_thread:
+                                    logger.warning(f"LLM вернул неправильную резьбу: '{llm_thread}' != '{client_thread}'")
+                                    llm_product = None
                             if llm_product:
                                 return self._finalize_match(MatchResult(
                                     product_id=UUID(llm_product['id']),
@@ -875,6 +894,18 @@ class MatchingService:
                                 (p for p in products if p["sku"] == llm_result["sku"]),
                                 None
                             )
+                            # Валидация типа товара (отвод ≠ муфта, кран ≠ тройник)
+                            if llm_product and client_type and client_type in CRITICAL_TYPES:
+                                llm_type = extract_product_type(llm_product['name'])
+                                if llm_type and llm_type != client_type:
+                                    logger.warning(f"LLM вернул неправильный тип: '{llm_type}' != '{client_type}'")
+                                    llm_product = None
+                            # Валидация типа резьбы (вн ≠ нар)
+                            if llm_product and client_thread:
+                                llm_thread = extract_thread_type(llm_product['name'])
+                                if llm_thread and llm_thread != client_thread:
+                                    logger.warning(f"LLM вернул неправильную резьбу: '{llm_thread}' != '{client_thread}'")
+                                    llm_product = None
                             if llm_product:
                                 return self._finalize_match(MatchResult(
                                     product_id=UUID(llm_product['id']),
@@ -922,6 +953,12 @@ class MatchingService:
                                     product_t = extract_product_type(llm_product['name'])
                                     if product_t and product_t != client_type:
                                         logger.debug(f"LLM L6 type mismatch: {client_type} vs {product_t}")
+                                        llm_product = None
+                                # Валидация типа резьбы (вн ≠ нар)
+                                if llm_product and client_thread:
+                                    llm_thread = extract_thread_type(llm_product['name'])
+                                    if llm_thread and llm_thread != client_thread:
+                                        logger.debug(f"LLM L6 thread mismatch: {client_thread} vs {llm_thread}")
                                         llm_product = None
                                 if llm_product:
                                     return self._finalize_match(MatchResult(
