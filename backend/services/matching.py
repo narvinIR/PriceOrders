@@ -2,7 +2,7 @@ import re
 import logging
 from threading import Lock
 from uuid import UUID
-from fuzzywuzzy import fuzz
+from rapidfuzz import fuzz
 from backend.models.database import get_supabase_client
 from backend.utils.normalizers import (
     normalize_sku, normalize_name, extract_pipe_size, extract_fitting_size,
@@ -14,6 +14,10 @@ from backend.services.embeddings import get_embedding_matcher
 from backend.services.llm_matcher import get_llm_matcher
 
 logger = logging.getLogger(__name__)
+
+# Критические типы товаров - фильтр по типу обязателен
+CRITICAL_TYPES = {"кран", "муфта", "отвод", "тройник", "переходник",
+                  "заглушка", "ревизия", "крестовина"}
 
 
 def detect_client_category(client_name: str) -> str | None:
@@ -513,6 +517,7 @@ class MatchingService:
         self._products_cache = None
         self._mappings_cache = {}
         self._mappings_lock = Lock()  # Thread safety для _mappings_cache
+        self._stats_lock = Lock()  # Thread safety для _stats
         self._embedding_matcher = get_embedding_matcher()
         self._stats = {
             'total': 0,
@@ -584,16 +589,18 @@ class MatchingService:
         return stats
 
     def reset_stats(self):
-        """Сбросить статистику"""
-        for key in self._stats:
-            self._stats[key] = 0 if isinstance(self._stats[key], int) else 0.0
+        """Сбросить статистику (thread-safe)"""
+        with self._stats_lock:
+            for key in self._stats:
+                self._stats[key] = 0 if isinstance(self._stats[key], int) else 0.0
 
     def _update_stats(self, match: MatchResult):
-        """Обновить статистику после match"""
-        self._stats['total'] += 1
-        self._stats['total_confidence'] += match.confidence
-        if match.match_type in self._stats:
-            self._stats[match.match_type] += 1
+        """Обновить статистику после match (thread-safe)"""
+        with self._stats_lock:
+            self._stats['total'] += 1
+            self._stats['total_confidence'] += match.confidence
+            if match.match_type in self._stats:
+                self._stats[match.match_type] += 1
 
     def _finalize_match(self, match: MatchResult) -> MatchResult:
         """Финализировать результат: логирование + статистика"""
@@ -757,7 +764,6 @@ class MatchingService:
 
                 # Фильтр по типу товара - ЖЁСТКИЙ для критических типов
                 # Кран НИКОГДА не должен совпадать с Отводом, Муфта с Тройником и т.д.
-                CRITICAL_TYPES = {"кран", "муфта", "отвод", "тройник", "переходник", "заглушка", "ревизия", "крестовина"}
                 if client_type:
                     type_filtered = [m for m in matches
                                      if extract_product_type(m[0]['name']) == client_type]
@@ -798,6 +804,35 @@ class MatchingService:
                                     if is_reducer(m[0]['name'])]
                     if red_filtered:
                         matches = red_filtered
+
+                # GUARD: Если все matches отфильтрованы - fallback на LLM
+                if not matches:
+                    logger.debug(f"Все fuzzy matches отфильтрованы для '{client_name}' - fallback на LLM (уровень 1)")
+                    llm = get_llm_matcher()
+                    if llm:
+                        if not llm.is_ready:
+                            llm.set_products(products)
+                        llm_result = llm.match(client_name)
+                        if llm_result and llm_result.get("sku"):
+                            llm_product = next(
+                                (p for p in products if p["sku"] == llm_result["sku"]),
+                                None
+                            )
+                            if llm_product:
+                                return self._finalize_match(MatchResult(
+                                    product_id=UUID(llm_product['id']),
+                                    product_sku=llm_product['sku'],
+                                    product_name=llm_product['name'],
+                                    confidence=float(llm_result.get("confidence", 70)),
+                                    match_type="llm_match",
+                                    needs_review=True,
+                                    pack_qty=llm_product.get('pack_qty', 1)
+                                ))
+                    # LLM не помог - not_found
+                    return self._finalize_match(MatchResult(
+                        product_id=None, product_sku=None, product_name=None,
+                        confidence=0.0, match_type="not_found", needs_review=True
+                    ))
 
                 # Теперь сортируем и берём top
                 matches.sort(key=lambda x: x[1], reverse=True)
@@ -953,7 +988,6 @@ class MatchingService:
 
                     # 4. Тип товара - КРИТИЧЕН (кран ≠ отвод, заглушка ≠ муфта)
                     if product:
-                        CRITICAL_TYPES = {"кран", "муфта", "отвод", "тройник", "переходник", "заглушка", "ревизия", "крестовина"}
                         client_type = extract_product_type(client_name)
                         if client_type and client_type in CRITICAL_TYPES:
                             product_type = extract_product_type(product['name'])

@@ -314,3 +314,218 @@ class TestNormalizeEqualSizes:
     def test_none_handling(self):
         """None возвращается как есть (для безопасности)"""
         assert normalize_equal_sizes(None) is None
+
+
+class TestEdgeCases:
+    """Тесты edge cases - критические сценарии"""
+
+    @pytest.fixture
+    def edge_matcher(self):
+        """Matcher для тестирования edge cases"""
+        products = [
+            {
+                'id': '11111111-1111-1111-1111-111111111111',
+                'sku': '202001',
+                'name': 'Труба канализационная ПП 110×2000',
+                'category': 'Канализация',
+                'pack_qty': 1
+            },
+            {
+                'id': '22222222-2222-2222-2222-222222222222',
+                'sku': '202002',
+                'name': 'Отвод канализационный 110/45',
+                'category': 'Канализация',
+                'pack_qty': 1
+            },
+            {
+                'id': '33333333-3333-3333-3333-333333333333',
+                'sku': '202003',
+                'name': 'Отвод канализационный 110/87',
+                'category': 'Канализация',
+                'pack_qty': 1
+            },
+        ]
+
+        with patch('backend.services.matching.get_supabase_client') as mock_db:
+            mock_client = MagicMock()
+            mock_db.return_value = mock_client
+
+            mock_client.table.return_value.select.return_value.execute.return_value = \
+                MagicMock(data=products)
+            mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = \
+                MagicMock(data=[])
+
+            matcher = MatchingService()
+            matcher._products_cache = products
+            matcher._mappings_cache = {}
+            matcher._embedding_matcher.search = MagicMock(return_value=[])
+            yield matcher
+
+    def test_empty_query_no_crash(self, edge_matcher, client_id):
+        """Пустой запрос не должен вызывать ошибку"""
+        result = edge_matcher.match_item(
+            client_id=client_id,
+            client_sku='',
+            client_name=''
+        )
+        assert result.match_type == 'not_found'
+        assert result.confidence == 0.0
+
+    def test_very_short_query(self, edge_matcher, client_id):
+        """Очень короткий запрос (1 символ) не должен вызывать ошибку"""
+        result = edge_matcher.match_item(
+            client_id=client_id,
+            client_sku='X',
+            client_name='X'
+        )
+        assert result.match_type == 'not_found'
+
+    def test_angle_filter_no_index_error(self, edge_matcher, client_id):
+        """Фильтр по углу не должен вызывать IndexError при отсутствии совпадений"""
+        result = edge_matcher.match_item(
+            client_id=client_id,
+            client_sku='',
+            client_name='Отвод канализационный 110/67'  # 67° нет в каталоге (есть 45 и 87)
+        )
+        # Не должно быть IndexError, должен вернуть результат
+        assert result is not None
+        assert hasattr(result, 'match_type')
+
+    def test_type_filter_no_index_error(self, edge_matcher, client_id):
+        """Фильтр по типу не должен вызывать IndexError"""
+        result = edge_matcher.match_item(
+            client_id=client_id,
+            client_sku='',
+            client_name='Крестовина канализационная 110'  # крестовины нет в тестовых данных
+        )
+        assert result is not None
+        assert hasattr(result, 'match_type')
+
+    def test_special_characters_no_crash(self, edge_matcher, client_id):
+        """Спецсимволы в запросе не должны вызывать ошибку"""
+        result = edge_matcher.match_item(
+            client_id=client_id,
+            client_sku='',
+            client_name='Труба <script>alert(1)</script> 110'
+        )
+        assert result is not None
+
+    def test_unicode_characters(self, edge_matcher, client_id):
+        """Unicode символы обрабатываются корректно"""
+        result = edge_matcher.match_item(
+            client_id=client_id,
+            client_sku='',
+            client_name='Труба канализационная 110×2000 「тест」'
+        )
+        assert result is not None
+
+
+class TestThreadSafety:
+    """Тесты потокобезопасности"""
+
+    def test_stats_initialization(self):
+        """MatchingService инициализирует _stats_lock"""
+        with patch('backend.services.matching.get_supabase_client') as mock_db:
+            mock_client = MagicMock()
+            mock_db.return_value = mock_client
+            mock_client.table.return_value.select.return_value.execute.return_value = \
+                MagicMock(data=[])
+
+            matcher = MatchingService()
+            assert hasattr(matcher, '_stats_lock')
+
+    def test_reset_stats_thread_safe(self):
+        """reset_stats() использует lock"""
+        with patch('backend.services.matching.get_supabase_client') as mock_db:
+            mock_client = MagicMock()
+            mock_db.return_value = mock_client
+            mock_client.table.return_value.select.return_value.execute.return_value = \
+                MagicMock(data=[])
+
+            matcher = MatchingService()
+            # Не должно быть ошибки при вызове
+            matcher.reset_stats()
+            assert matcher._stats['total'] == 0
+
+
+class TestLLMMatcherValidation:
+    """Тесты валидации LLM matcher"""
+
+    def test_invalid_json_returns_default(self):
+        """Некорректный JSON возвращает default result"""
+        from backend.services.llm_matcher import LLMMatcher
+
+        matcher = LLMMatcher(api_key="test-key")
+        matcher.products_cache = "test"
+        matcher._products_list = []
+
+        with patch('httpx.post') as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                'choices': [{'message': {'content': 'not a json'}}]
+            }
+            mock_post.return_value = mock_response
+
+            result = matcher.match("test query")
+            # Должен вернуть default result с confidence 0
+            assert result is not None
+            assert result.get('confidence', 0) == 0
+
+    def test_empty_content_handled(self):
+        """Пустой content от LLM обрабатывается корректно"""
+        from backend.services.llm_matcher import LLMMatcher
+
+        matcher = LLMMatcher(api_key="test-key")
+        matcher.products_cache = "test"
+        matcher._products_list = []
+
+        with patch('httpx.post') as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                'choices': [{'message': {'content': ''}}]
+            }
+            mock_post.return_value = mock_response
+
+            result = matcher.match("test query")
+            # Не должно быть exception
+            assert result is not None
+
+    def test_confidence_clamped_to_100(self):
+        """confidence > 100 ограничивается до 100"""
+        from backend.services.llm_matcher import LLMMatcher
+
+        matcher = LLMMatcher(api_key="test-key")
+        matcher.products_cache = "test"
+        matcher._products_list = []
+
+        with patch('httpx.post') as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                'choices': [{'message': {'content': '{"sku": "123", "name": "test", "confidence": 150}'}}]
+            }
+            mock_post.return_value = mock_response
+
+            result = matcher.match("test query")
+            assert result['confidence'] <= 100
+
+    def test_negative_confidence_clamped_to_0(self):
+        """confidence < 0 ограничивается до 0"""
+        from backend.services.llm_matcher import LLMMatcher
+
+        matcher = LLMMatcher(api_key="test-key")
+        matcher.products_cache = "test"
+        matcher._products_list = []
+
+        with patch('httpx.post') as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                'choices': [{'message': {'content': '{"sku": "123", "name": "test", "confidence": -50}'}}]
+            }
+            mock_post.return_value = mock_response
+
+            result = matcher.match("test query")
+            assert result['confidence'] >= 0

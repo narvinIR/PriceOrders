@@ -13,8 +13,7 @@ pandas>=2.1.0
 openpyxl>=3.1.0
 
 # Fuzzy Matching
-fuzzywuzzy>=0.18.0
-python-Levenshtein>=0.23.0
+rapidfuzz>=3.5.0
 
 # Frontend
 streamlit>=1.28.0
@@ -23,6 +22,7 @@ streamlit>=1.28.0
 python-dotenv>=1.0.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
+httpx>=0.25.0
 
 # ML Matching (embeddings)
 sentence-transformers>=2.2.0

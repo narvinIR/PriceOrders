@@ -196,12 +196,38 @@ class LLMMatcher:
                 content = json_match.group(0)
 
             result = json.loads(content)
-            logger.info(f"LLM match: '{query}' → {result.get('sku')} ({result.get('confidence')}%)")
-            return result
+
+            # Валидация обязательных полей
+            if not isinstance(result, dict):
+                logger.error(f"LLM вернул не dict: {type(result)}")
+                return None
+
+            # Нормализация полей (могут быть None или отсутствовать)
+            sku = result.get('sku')
+            name = result.get('name')
+            confidence = result.get('confidence', 0)
+
+            # Проверяем что confidence - число
+            try:
+                confidence = float(confidence) if confidence else 0
+            except (TypeError, ValueError):
+                confidence = 0
+
+            # Ограничиваем confidence диапазоном 0-100
+            confidence = max(0, min(100, confidence))
+
+            validated_result = {
+                'sku': sku if sku else None,
+                'name': name if name else None,
+                'confidence': confidence
+            }
+
+            logger.info(f"LLM match: '{query}' → {validated_result.get('sku')} ({validated_result.get('confidence')}%)")
+            return validated_result
 
         except json.JSONDecodeError as e:
             logger.error(f"LLM JSON parse error: {e}, content: {content[:100] if content else 'empty'}")
-            return None
+            return {'sku': None, 'name': None, 'confidence': 0}
         except httpx.TimeoutException:
             logger.error("LLM API timeout (30s)")
             return None
