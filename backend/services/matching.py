@@ -476,6 +476,25 @@ def extract_mm_from_clamp(client_name: str) -> int | None:
     return None
 
 
+def normalize_equal_sizes(size: tuple) -> tuple:
+    """
+    Нормализует одинаковые размеры: (25, 25) → (25,), (20, 20, 20) → (20,)
+
+    Для ПНД компрессионных фитингов:
+    - "Отвод 25-25" в запросе = "Отвод 25" в каталоге
+    - "Тройник 20-20-20" = "Тройник 20"
+
+    НЕ нормализует разные размеры (переходники):
+    - (25, 20) остаётся (25, 20)
+    - (32, 25, 32) остаётся (32, 25, 32)
+    """
+    if not size:
+        return size
+    if len(size) >= 2 and len(set(size)) == 1:
+        return (size[0],)  # Все размеры одинаковы
+    return size
+
+
 def clamp_fits_mm(product_name: str, target_mm: int) -> bool:
     """Проверить подходит ли хомут по диапазону мм"""
     # Формат: (107-115) или (87-92)
@@ -706,17 +725,20 @@ class MatchingService:
                         continue
 
                 # Проверка размера фитинга (муфта 25 ≠ муфта 50)
-                # Если клиент указал 1 размер (110), он должен быть первым размером в каталоге
-                # (110,) совместима с (110,), (110, 110), (110, 50)
+                # Нормализуем одинаковые размеры: (25, 25) → (25,), (20, 20, 20) → (20,)
+                # Это важно для ПНД где "Отвод 25-25" = "Отвод 25" в каталоге
                 if client_fitting_size:
                     product_fitting = extract_fitting_size(product['name'])
                     if product_fitting:
-                        if len(client_fitting_size) == 1:
+                        norm_client = normalize_equal_sizes(client_fitting_size)
+                        norm_product = normalize_equal_sizes(product_fitting)
+
+                        if len(norm_client) == 1:
                             # Один размер - проверяем первый размер каталога
-                            if product_fitting[0] != client_fitting_size[0]:
+                            if norm_product[0] != norm_client[0]:
                                 continue
-                        elif product_fitting != client_fitting_size:
-                            # Несколько размеров - точное совпадение
+                        elif norm_product != norm_client:
+                            # Разные размеры (переходники) - точное совпадение
                             continue
 
                 prod_norm_name = normalize_name(product['name'])
@@ -804,6 +826,35 @@ class MatchingService:
                                if not is_eco_product(m[0]['name'])]
                     if non_eco:
                         top_matches = non_eco
+
+                # GUARD: Если все фильтры отсеяли matches - fallback на LLM
+                if not top_matches:
+                    logger.debug(f"Все fuzzy matches отфильтрованы для '{client_name}' - fallback на LLM")
+                    llm = get_llm_matcher()
+                    if llm:
+                        if not llm.is_ready:
+                            llm.set_products(products)
+                        llm_result = llm.match(client_name)
+                        if llm_result and llm_result.get("sku"):
+                            llm_product = next(
+                                (p for p in products if p["sku"] == llm_result["sku"]),
+                                None
+                            )
+                            if llm_product:
+                                return self._finalize_match(MatchResult(
+                                    product_id=UUID(llm_product['id']),
+                                    product_sku=llm_product['sku'],
+                                    product_name=llm_product['name'],
+                                    confidence=float(llm_result.get("confidence", 70)),
+                                    match_type="llm_match",
+                                    needs_review=True,
+                                    pack_qty=llm_product.get('pack_qty', 1)
+                                ))
+                    # LLM не помог - not_found
+                    return self._finalize_match(MatchResult(
+                        product_id=None, product_sku=None, product_name=None,
+                        confidence=0.0, match_type="not_found", needs_review=True
+                    ))
 
                 best_match, best_ratio = top_matches[0]
                 conf = settings.confidence_fuzzy_name * (best_ratio / 100)

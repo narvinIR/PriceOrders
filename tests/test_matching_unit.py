@@ -14,6 +14,7 @@ from backend.services.matching import (
     is_eco_product,
     extract_mm_from_clamp,
     clamp_fits_mm,
+    normalize_equal_sizes,
 )
 
 
@@ -278,3 +279,38 @@ class TestEcoPreference:
             client_name='Труба ПП ЭКО 110×2000'
         )
         assert 'ЭКО' in result.product_name
+
+
+class TestNormalizeEqualSizes:
+    """Тесты для normalize_equal_sizes() - нормализация одинаковых размеров ПНД"""
+
+    def test_equal_two_sizes(self):
+        """(25, 25) → (25,) - отвод 25-25 = отвод 25"""
+        assert normalize_equal_sizes((25, 25)) == (25,)
+        assert normalize_equal_sizes((20, 20)) == (20,)
+        assert normalize_equal_sizes((32, 32)) == (32,)
+
+    def test_equal_three_sizes(self):
+        """(25, 25, 25) → (25,) - тройник 25-25-25 = тройник 25"""
+        assert normalize_equal_sizes((20, 20, 20)) == (20,)
+        assert normalize_equal_sizes((25, 25, 25)) == (25,)
+        assert normalize_equal_sizes((32, 32, 32)) == (32,)
+
+    def test_different_sizes_unchanged(self):
+        """Разные размеры (переходники) остаются без изменений"""
+        assert normalize_equal_sizes((25, 20)) == (25, 20)
+        assert normalize_equal_sizes((32, 25)) == (32, 25)
+        assert normalize_equal_sizes((32, 25, 32)) == (32, 25, 32)  # тройник переходник
+
+    def test_single_size_unchanged(self):
+        """Один размер остаётся без изменений"""
+        assert normalize_equal_sizes((25,)) == (25,)
+        assert normalize_equal_sizes((110,)) == (110,)
+
+    def test_empty_tuple(self):
+        """Пустой tuple возвращается как есть"""
+        assert normalize_equal_sizes(()) == ()
+
+    def test_none_handling(self):
+        """None возвращается как есть (для безопасности)"""
+        assert normalize_equal_sizes(None) is None
