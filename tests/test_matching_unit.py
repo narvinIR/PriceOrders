@@ -186,7 +186,8 @@ class TestSizeMatching:
             matcher = MatchingService()
             matcher._products_cache = products
             matcher._mappings_cache = {}
-            matcher._embedding_matcher._initialized = False
+            # Мок pgvector - возвращает пустой список чтобы использовать mocked products
+            matcher._embedding_matcher.search = MagicMock(return_value=[])
             yield matcher
 
     def test_exact_size_match_2000(self, size_matcher, client_id):
@@ -255,7 +256,8 @@ class TestEcoPreference:
             matcher = MatchingService()
             matcher._products_cache = products
             matcher._mappings_cache = {}
-            matcher._embedding_matcher._initialized = False
+            # Мок pgvector - возвращает пустой список чтобы использовать mocked products
+            matcher._embedding_matcher.search = MagicMock(return_value=[])
             yield matcher
 
     def test_prefer_standard_when_no_eco_specified(self, eco_matcher, client_id):

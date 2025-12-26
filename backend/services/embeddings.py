@@ -131,9 +131,8 @@ class EmbeddingMatcher:
 
     @property
     def is_ready(self) -> bool:
-        """pgvector готов только если ML matching включён"""
-        from backend.config import settings
-        return settings.enable_ml_matching
+        """pgvector всегда готов - embeddings хранятся в PostgreSQL"""
+        return True
 
 
 # Singleton для использования во всём приложении
