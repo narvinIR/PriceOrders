@@ -501,9 +501,8 @@ class MatchingService:
             'exact_name': 0,
             'cached_mapping': 0,
             'fuzzy_sku': 0,
-            'fuzzy_name': 0,
+            'fuzzy_name': 0,  # теперь включает pgvector + fuzzy hybrid
             'llm_match': 0,
-            'semantic_embedding': 0,
             'not_found': 0,
             'total_confidence': 0.0,
         }
@@ -591,14 +590,14 @@ class MatchingService:
 
     def match_item(self, client_id: UUID | None, client_sku: str, client_name: str = None) -> MatchResult:
         """
-        7-уровневый алгоритм маппинга:
+        6-уровневый гибридный алгоритм маппинга (v4.0):
         1. Точное совпадение артикула → 100%
         2. Точное совпадение названия → 95%
         3. Кэшированный маппинг → 100%
         4. Fuzzy SKU (Levenshtein dist ≤ 1) → 90%
-        5. Fuzzy название (ratio ≥ 75) → 80%
-        6. Semantic embedding (ML) → ≤75%
-        7. Требует ручной проверки → 0%
+        5. Гибридный: pgvector TOP-30 → fuzzy scoring → фильтры → 80%
+        6. LLM verification (если confidence < 75%) → ≤75%
+        7. Не найдено → 0%
         """
         logger.debug(f"Matching: sku={client_sku!r}, name={client_name!r}")
 
@@ -672,7 +671,7 @@ class MatchingService:
                 pack_qty=best_sku_match.get('pack_qty', 1)
             ))
 
-        # Level 5: Fuzzy название
+        # Level 5: Гибридный поиск (pgvector + fuzzy + фильтры)
         if norm_name:
             # Извлекаем параметры из клиентского запроса
             client_size = extract_pipe_size(client_name or "")
@@ -686,9 +685,14 @@ class MatchingService:
             client_is_detachable = is_coupling_detachable(client_name or "")
             client_is_reducer = is_reducer(client_name or "")
 
-            # Собираем все совпадения выше порога
+            # Level 5: Full scan с fuzzy matching + фильтры
+            # NOTE: pgvector отключён - embeddings в БД устарели и требуют пересчёта
+            # TODO: после пересчёта embeddings вернуть pgvector как оптимизацию
+            search_products = products
+
+            # Собираем все совпадения выше порога с fuzzy scoring
             matches = []
-            for product in products:
+            for product in search_products:
                 # Проверка точного размера труб (если указан)
                 if client_size:
                     product_size = extract_pipe_size(product['name'])
@@ -702,10 +706,18 @@ class MatchingService:
                         continue
 
                 # Проверка размера фитинга (муфта 25 ≠ муфта 50)
+                # Если клиент указал 1 размер (110), он должен быть первым размером в каталоге
+                # (110,) совместима с (110,), (110, 110), (110, 50)
                 if client_fitting_size:
                     product_fitting = extract_fitting_size(product['name'])
-                    if product_fitting and product_fitting != client_fitting_size:
-                        continue
+                    if product_fitting:
+                        if len(client_fitting_size) == 1:
+                            # Один размер - проверяем первый размер каталога
+                            if product_fitting[0] != client_fitting_size[0]:
+                                continue
+                        elif product_fitting != client_fitting_size:
+                            # Несколько размеров - точное совпадение
+                            continue
 
                 prod_norm_name = normalize_name(product['name'])
                 ratio = max(
@@ -910,46 +922,7 @@ class MatchingService:
                         pack_qty=product.get('pack_qty', 1)
                     ))
 
-        # Fallback: Semantic embedding (если LLM недоступен)
-        if self._embedding_matcher.is_ready and client_name:
-            results = self._embedding_matcher.search(
-                client_name, top_k=20, min_score=0.55
-            )
-            if results:
-                client_cat = detect_client_category(client_name)
-                client_type = extract_product_type(client_name)
-                client_angle = extract_angle(client_name)
-                client_thread = extract_thread_type(client_name)
-                client_fitting_size = extract_fitting_size(client_name)
-                client_thread_size = extract_thread_size(client_name)
-                client_is_detachable = is_coupling_detachable(client_name)
-                client_is_reducer = is_reducer(client_name)
-                client_clamp_mm = extract_mm_from_clamp(client_name)
-
-                filtered = filter_by_product_type(results, client_type)
-                filtered = filter_by_angle(filtered, client_angle)
-                filtered = filter_by_thread(filtered, client_thread)
-                filtered = filter_by_detachable(filtered, client_is_detachable)
-                filtered = filter_by_reducer(filtered, client_is_reducer)
-                filtered = filter_by_category(filtered, client_cat)
-                filtered = filter_by_fitting_size(filtered, client_fitting_size)
-                filtered = filter_by_thread_size(filtered, client_thread_size)
-                filtered = filter_by_clamp_size(filtered, client_clamp_mm)
-
-                if filtered:
-                    product, score = filtered[0]
-                    conf = score * 100 * 0.75
-                    return self._finalize_match(MatchResult(
-                        product_id=UUID(product['id']),
-                        product_sku=product['sku'],
-                        product_name=product['name'],
-                        confidence=conf,
-                        match_type="semantic_embedding",
-                        needs_review=True,
-                        pack_qty=product.get('pack_qty', 1)
-                    ))
-
-        # Level 8: Не найдено - требует ручной проверки
+        # Level 7: Не найдено - требует ручной проверки
         return self._finalize_match(MatchResult(
             product_id=None,
             product_sku=None,
