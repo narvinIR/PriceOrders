@@ -196,6 +196,10 @@ def normalize_name(name: str) -> str:
     result = re.sub(r'(\d+)\s*мм\b', r'\1', result)
     # Убираем углы с "град/градус/гр" (90 град → 90)
     result = re.sub(r'\b(45|67|87|90)\s*(?:град(?:ус)?\.?|гр\.?)\b', r'\1', result, flags=re.IGNORECASE)
+    # Для отводов: "110/45" = диаметр 110 + угол 45° → "110 45"
+    # Чтобы "отвод 110/45" совпал с каталогом "отвод канализационн 45 110"
+    if any(x in result for x in ['отвод', 'колено', 'угол']):
+        result = re.sub(r'\b(\d{2,3})/(45|67|87|90)\b', r'\1 \2', result)
     # Формат СТ: "d40 L250мм" или "d50 (1,8) L150мм" → "40×250"
     def convert_st_pipe_format(m):
         diameter = m.group(1)
