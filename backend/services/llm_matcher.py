@@ -117,9 +117,9 @@ class LLMMatcher:
         Формируем компактный список SKU - название.
         """
         self._products_list = products
-        # Формируем компактный список для промпта (лимит ~800 товаров для контекста)
+        # Формируем компактный список для промпта (лимит увеличен до 3000, т.к. каталог ~840 товаров)
         lines = []
-        for p in products[:800]:
+        for p in products[:3000]:
             sku = p.get('sku', '')
             name = p.get('name', '')
             if sku and name:
