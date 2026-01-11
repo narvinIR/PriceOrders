@@ -77,32 +77,19 @@ _PROMPT_CACHE_TTL = 600  # 10 минут
 
 def _get_system_prompt() -> str:
     """Загрузить промпт из Supabase с кэшированием 10 минут."""
-    cache_key = "llm_system_prompt"
-    now = time.time()
-
-    # Проверяем кэш
-    if cache_key in _prompt_cache:
-        prompt, cached_at = _prompt_cache[cache_key]
-        if now - cached_at < _PROMPT_CACHE_TTL:
-            return prompt
-
-    # Загружаем из БД
-    try:
-        from backend.models.database import get_supabase_client
-        supabase = get_supabase_client()
-        result = supabase.table("settings").select("value").eq("key", cache_key).single().execute()
-
-        if result.data and result.data.get("value"):
-            prompt = result.data["value"]
-            _prompt_cache[cache_key] = (prompt, now)
-            logger.info("✅ LLM промпт загружен из Supabase")
-            return prompt
-    except Exception as e:
-        logger.warning(f"⚠️ Не удалось загрузить промпт из БД: {e}")
-
-    # Fallback
-    logger.info("📝 Используется fallback промпт")
+    # FORCE OVERRIDE: Игнорируем БД, так как там старый промпт, который ломает логику.
+    # Используем только жестко заданный строгий промпт.
     return DEFAULT_SYSTEM_PROMPT
+
+    # --- DB Loading Disabled for stability ---
+    # cache_key = "llm_system_prompt"
+    # now = time.time()
+    # if cache_key in _prompt_cache: ...
+    # try:
+    #     result = supabase.table("settings").select("value").eq("key", cache_key).single().execute()
+    #     ...
+    # except ...
+
 
 
 class LLMMatcher:
@@ -269,3 +256,4 @@ def get_llm_matcher() -> Optional[LLMMatcher]:
         else:
             logger.warning("⚠️ OPENROUTER_API_KEY не установлен - LLM matching отключен")
     return _llm_matcher
+

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # LLM Matching (OpenRouter) - замена тяжёлого embedding
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
-    llm_model: str = os.getenv("LLM_MODEL", "deepseek/deepseek-v3.2")
+    llm_model: str = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-001")
 
     # OCR для рукописных заказов (Vision LLM)
     ocr_model: str = os.getenv("OCR_MODEL", "qwen/qwen3-vl-32b-instruct")
