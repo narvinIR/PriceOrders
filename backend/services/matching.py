@@ -34,6 +34,7 @@ from backend.constants import CRITICAL_TYPES
 from backend.services.matching_strategies.exact import ExactSkuStrategy, ExactNameStrategy, CachedMappingStrategy
 from backend.services.matching_strategies.fuzzy import FuzzySkuStrategy
 from backend.services.matching_strategies.hybrid import HybridStrategy
+from backend.services.matching_strategies.llm import LlmStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,8 @@ class MatchingService:
             ExactNameStrategy(),
             CachedMappingStrategy(),
             FuzzySkuStrategy(),
-            HybridStrategy()
+            HybridStrategy(),
+            LlmStrategy()
         ]
 
     def _load_products(self) -> list[dict]:
