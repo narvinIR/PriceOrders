@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Any
 from datetime import datetime
 from uuid import UUID
@@ -32,8 +32,7 @@ class Product(ProductBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Clients
 class ClientBase(BaseModel):
@@ -50,8 +49,7 @@ class Client(ClientBase):
     id: UUID
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Mappings
 class MappingBase(BaseModel):
@@ -70,8 +68,7 @@ class Mapping(MappingBase):
     verified_at: Optional[datetime] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Orders
 class OrderItemBase(BaseModel):
@@ -91,8 +88,7 @@ class OrderItem(OrderItemBase):
     # Populated from join
     product: Optional[Product] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class OrderBase(BaseModel):
     client_id: UUID
@@ -112,8 +108,7 @@ class Order(OrderBase):
     items: list[OrderItem] = []
     client: Optional[Client] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Matching Result
 class MatchResult(BaseModel):

@@ -136,6 +136,8 @@ def normalize_sku(sku: str) -> str:
     result = sku.upper()
     # Убираем пробелы, дефисы, точки, слэши
     result = re.sub(r'[\s\-\.\/_]+', '', result)
+    # Убираем trailing + (клиенты добавляют для пометок)
+    result = result.rstrip('+')
     # Убираем leading zeros
     result = result.lstrip('0') or '0'
     return result
