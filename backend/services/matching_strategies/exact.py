@@ -13,10 +13,20 @@ class ExactSkuStrategy(MatchingStrategy):
         products: List[Dict[str, Any]],
         mappings: Dict[str, Any]
     ) -> Optional[MatchResult]:
+        from backend.utils.normalizers import extract_sku_from_text
+        
         norm_sku = normalize_sku(client_sku)
         
+        # Также пробуем извлечь артикул из начала client_name
+        extracted_sku = None
+        if client_name:
+            extracted = extract_sku_from_text(client_name)
+            if extracted:
+                extracted_sku = normalize_sku(extracted)
+        
         for product in products:
-            if normalize_sku(product['sku']) == norm_sku:
+            prod_sku = normalize_sku(product['sku'])
+            if (norm_sku and prod_sku == norm_sku) or (extracted_sku and prod_sku == extracted_sku):
                 return MatchResult(
                     product_id=UUID(product['id']),
                     product_sku=product['sku'],
@@ -27,6 +37,7 @@ class ExactSkuStrategy(MatchingStrategy):
                     pack_qty=product.get('pack_qty', 1)
                 )
         return None
+
 
 class ExactNameStrategy(MatchingStrategy):
     def match(

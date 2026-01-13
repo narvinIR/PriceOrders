@@ -14,7 +14,15 @@ class FuzzySkuStrategy(MatchingStrategy):
         products: List[Dict[str, Any]],
         mappings: Dict[str, Any]
     ) -> Optional[MatchResult]:
+        from backend.utils.normalizers import extract_sku_from_text
+        
         norm_sku = normalize_sku(client_sku)
+        
+        # Fallback: извлечь артикул из client_name если client_sku пустой
+        if not norm_sku and client_name:
+            extracted = extract_sku_from_text(client_name)
+            if extracted:
+                norm_sku = normalize_sku(extracted)
         
         best_sku_match = None
         best_sku_ratio = 0

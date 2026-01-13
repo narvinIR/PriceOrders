@@ -140,6 +140,29 @@ def normalize_sku(sku: str) -> str:
     result = result.lstrip('0') or '0'
     return result
 
+def extract_sku_from_text(text: str) -> str | None:
+    """
+    Извлечь артикул Jakko из начала строки.
+    
+    Форматы артикулов Jakko:
+    - 101146763T (9 цифр + буква)
+    - 101146763K (9 цифр + буква)
+    - 101146763 (только цифры)
+    - 101146763+ (цифры + символ +)
+    
+    Возвращает извлечённый артикул или None.
+    """
+    if not text:
+        return None
+    
+    # Ищем артикул в начале строки (с опциональными пробелами)
+    # Паттерн: 9+ цифр, опционально буква K/T/R/S, опционально символ +
+    match = re.match(r'^\s*(\d{9,}[KTRS]*[+]?)\s', text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    
+    return None
+
 def normalize_name(name: str) -> str:
     """Нормализация названия товара для fuzzy matching"""
     if not name:
