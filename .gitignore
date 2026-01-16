@@ -1,5 +1,5 @@
 # Environment
-.env
+# .env - UNCOMMENTED: storing in git for backup
 .env.local
 .env.*.local
 
