@@ -18,6 +18,16 @@
 - **ML:** sentence-transformers, FAISS (semantic search)
 - **Библиотеки:** fuzzywuzzy, pandas, openpyxl, pydantic-settings
 
+## 🗄️ Database (Supabase)
+
+- **URL:** `https://cyfmvsxqswbkazgckxbs.supabase.co`
+- **Таблицы:**
+  - `products`: Каталог (839 шт.) + embeddings
+  - `mappings`: Связи (client_sku ↔ product_id)
+  - `orders`: История
+- **Access:** Требуется `SUPABASE_SERVICE_ROLE_KEY` в `.env` (JWT) для работы скриптов.
+- **Note:** `match_stats` не используется (in-memory).
+
 ## Архитектура
 
 ```
