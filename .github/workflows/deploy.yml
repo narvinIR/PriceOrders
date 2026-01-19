@@ -1,0 +1,24 @@
+name: Deploy to Northflank
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger Northflank Deploy
+        run: |
+          curl -X POST "${{ secrets.NORTHFLANK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "branch": "main",
+              "commit": "${{ github.sha }}"
+            }'
+        env:
+          NORTHFLANK_WEBHOOK_URL: ${{ secrets.NORTHFLANK_WEBHOOK_URL }}
