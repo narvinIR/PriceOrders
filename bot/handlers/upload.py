@@ -90,12 +90,15 @@ async def _process_items_parallel(items: list) -> tuple[list, int, int]:
     """
     matcher = get_matcher()
 
-    # Генерируем session_id для кэширования маппингов в рамках сессии
-    session_id = uuid4()
+    # Используем client_id клиента Эльф для загрузки импортированных маппингов
+    # TODO: в будущем определять client_id по Telegram user_id
+    from uuid import UUID
+
+    elf_client_id = UUID("5013baff-4e85-448c-a8af-a90594407e43")
 
     # Запускаем все товары параллельно
     tasks = [
-        asyncio.to_thread(_match_single_item, matcher, item, session_id)
+        asyncio.to_thread(_match_single_item, matcher, item, elf_client_id)
         for item in items
     ]
 
