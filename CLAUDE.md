@@ -66,12 +66,14 @@ tests/
 LLM matching через OpenRouter API заменяет локальный ML (экономит ~500 МБ RAM).
 
 **Промпт хранится в Supabase:**
+
 - Таблица: `settings`
 - Ключ: `llm_system_prompt`
 - Кэширование: 10 минут
 - Fallback: `DEFAULT_SYSTEM_PROMPT` в коде
 
 **Редактирование промпта:**
+
 ```sql
 UPDATE settings SET value = '...' WHERE key = 'llm_system_prompt';
 ```
@@ -79,6 +81,7 @@ UPDATE settings SET value = '...' WHERE key = 'llm_system_prompt';
 ### Фильтры matching (v3.0)
 
 Применяются ДО выбора лучшего совпадения:
+
 - **extract_product_type** - тип: труба, отвод, тройник, муфта, заглушка...
 - **extract_angle** - угол: 45°, 67°, 87°, 90°
 - **extract_thread_type** - резьба: вн (в/р), нар (н/р)
@@ -88,12 +91,14 @@ UPDATE settings SET value = '...' WHERE key = 'llm_system_prompt';
 ### Нормализация названий
 
 Удаляется:
+
 - Упаковка: `(уп 20 шт)`, `(20 шт)`
 - Толщина: `(2.7)`, `(2.2)`
 - Бренд: `Jk`, `Jakko` (НО НЕ Prestige!)
 - Цвет: `серый`, `белый`
 
 Конвертируется:
+
 - `переход` → `переходник`
 - `колено/угол/угольник` → `отвод`
 - `ПП/ППР` → `полипропилен`
@@ -107,6 +112,7 @@ UPDATE settings SET value = '...' WHERE key = 'llm_system_prompt';
 ### Точный matching размеров
 
 Для труб извлекается размер (диаметр×длина):
+
 - `extract_pipe_size("Труба 110×2000")` → `(110, 2000)`
 - При fuzzy matching товары с другим размером пропускаются
 - 110×2000 НЕ совпадёт с 110×3000
@@ -145,6 +151,7 @@ PYTHONPATH=. python tests/test_matching_full.py
 - `GET /analytics/matching/levels` - описание алгоритма
 
 Пример ответа `/matching/stats`:
+
 ```json
 {
   "total": 263,
@@ -160,6 +167,7 @@ PYTHONPATH=. python tests/test_matching_full.py
 ## Важные файлы для изменений matching
 
 При улучшении алгоритма сопоставления:
+
 - [normalizers.py](backend/utils/normalizers.py) - добавить правила нормализации
 - [matching.py](backend/services/matching.py) - изменить логику matching
 - [embeddings.py](backend/services/embeddings.py) - ML semantic search
@@ -174,6 +182,7 @@ PYTHONPATH=. python tests/test_matching_full.py
 ## MCP Memory
 
 Контекст проекта сохранён в MCP memory:
+
 - `PriceOrders_MVP_Complete` - статус реализации
 - `PriceOrders_Matching_Algorithm` - алгоритм matching (v3.0)
 - `PriceOrders_Normalizers` - правила нормализации
@@ -185,8 +194,73 @@ PYTHONPATH=. python tests/test_matching_full.py
 ## Telegram Bot
 
 Бот для B2B клиентов:
+
 - Отправь список артикулов → получи Excel с результатом
 - Формат: `название количество` (каждый с новой строки)
 - Пример: `Труба ПП 110×3000 серая 5`
 
 Запуск: `PYTHONPATH=. python3 bot/main.py`
+
+## Northflank Deployment
+
+**Проект:** `jakko`  
+**Сервис:** `priceorders-bot`  
+**URL:** https://jakko--priceorders-bot--kbhsjrb6n8tm.code.run
+
+### API Token
+
+```bash
+export NF_TOKEN="nf-eyJhbGciOiJIUzI1NiIsInR5cCI..."
+```
+
+Токен сохранён в `~/.northflank/.env`
+
+### Northflank API (curl)
+
+```bash
+# Статус сервиса
+curl -s -H "Authorization: Bearer $NF_TOKEN" \
+  "https://api.northflank.com/v1/projects/jakko/services/priceorders-bot" \
+  | jq '{sha: .data.deployment.internal.deployedSHA[0:7], status: .data.status.deployment.status}'
+
+# Рестарт сервиса (очистка кэша)
+curl -s -X POST -H "Authorization: Bearer $NF_TOKEN" \
+  "https://api.northflank.com/v1/projects/jakko/services/priceorders-bot/restart"
+
+# Логи (последние 20)
+curl -s -H "Authorization: Bearer $NF_TOKEN" \
+  "https://api.northflank.com/v1/projects/jakko/services/priceorders-bot/logs?limit=20"
+```
+
+### Northflank CLI
+
+```bash
+# Установка (локально)
+npm install @northflank/cli --prefix ~/.local
+export PATH=$HOME/.local/node_modules/.bin:$PATH
+
+# Логи в реальном времени
+northflank get service logs --tail --projectId jakko --serviceId priceorders-bot
+
+# SSH в pod
+northflank exec service --projectId jakko --serviceId priceorders-bot
+```
+
+### Деплой
+
+Автоматический при push в `main`:
+
+```bash
+git add . && git commit -m "fix: description" && git push origin main
+```
+
+Northflank подхватывает изменения из GitHub и запускает Docker build.
+
+### Клиенты и маппинги
+
+**Эльф:**
+
+- `client_id`: `5013baff-4e85-448c-a8af-a90594407e43`
+- Маппинги: 167 записей в таблице `mappings`
+- Импорт: `PYTHONPATH=. python3 scripts/import_elf_mappings.py`
+- Тест: `PYTHONPATH=. python3 scripts/test_elf_matching.py`
