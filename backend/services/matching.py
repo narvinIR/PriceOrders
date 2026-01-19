@@ -130,6 +130,32 @@ class MatchingService:
             for key in self._stats:
                 self._stats[key] = 0 if isinstance(self._stats[key], int) else 0.0
 
+    def save_mapping(self, client_id: UUID, client_sku: str, product_id: UUID,
+                     confidence: float, match_type: str, verified: bool = False):
+        """Сохранение маппинга в БД (UPSERT)"""
+        from datetime import datetime
+        data = {
+            'client_id': str(client_id),
+            'client_sku': client_sku,
+            'product_id': str(product_id),
+            'confidence': confidence,
+            'match_type': match_type,
+            'verified': verified
+        }
+        if verified:
+            data['verified_at'] = datetime.utcnow().isoformat()
+
+        self.db.table('mappings').upsert(
+            data,
+            on_conflict='client_id,client_sku'
+        ).execute()
+
+        # Инвалидируем кэш клиента
+        client_key = str(client_id)
+        with self._mappings_lock:
+            if client_key in self._mappings_cache:
+                del self._mappings_cache[client_key]
+
     def _update_stats(self, match: MatchResult):
         """Обновить статистику после match (thread-safe)"""
         with self._stats_lock:
