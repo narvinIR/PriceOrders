@@ -444,41 +444,50 @@ async def handle_text_list(message: Message):
         # Убираем TAB → пробел, убираем ! (маркер клиента)
         line = line.replace("\t", " ").replace("!", "").strip()
 
-        # Паттерн 0: формат "название  шт  число" (Эльф формат)
-        # Число может быть с пробелом-разделителем тысяч: "1 300"
-        match_elf = re.match(r"^(.+?)\s+шт\s+([\d\s]+)$", line, re.IGNORECASE)
-        if match_elf:
-            sku = match_elf.group(1).strip()
-            qty_str = match_elf.group(2).replace(" ", "")  # "1 300" → "1300"
-            try:
-                qty = int(qty_str)
-            except ValueError:
-                qty = 1
+        # Паттерн 0: формат "название N шт" в конце (любое количество)
+        # Примеры: "Муфта компрессионная 20 Tebo/UNIO 60 шт", "9 (30) Труба ПП 100 шт"
+        match_qty_sht = re.search(r"\s+(\d+)\s*шт\.?\s*$", line, re.IGNORECASE)
+        if match_qty_sht:
+            qty = int(match_qty_sht.group(1))
+            sku = line[: match_qty_sht.start()].strip()
+            # Убираем номер строки и количество в скобках из начала
+            # "9 (30) Муфта..." → "Муфта..."
+            sku = re.sub(r"^\d+\s*(\(\d+\))?\s*", "", sku).strip()
         else:
-            # Паттерн 1: формат СТ "/число/" - количество в слешах
-            match_st = re.search(r"/(\d{1,3})/\s*$", line)
-            if match_st:
-                qty = int(match_st.group(1))
-                sku = re.sub(r"\s*/\d+/\s*$", "", line).strip()
+            # Паттерн 1: формат "название  шт  число" (Эльф формат)
+            match_elf = re.match(r"^(.+?)\s+шт\s+([\d\s]+)$", line, re.IGNORECASE)
+            if match_elf:
+                sku = match_elf.group(1).strip()
+                qty_str = match_elf.group(2).replace(" ", "")  # "1 300" → "1300"
+                try:
+                    qty = int(qty_str)
+                except ValueError:
+                    qty = 1
             else:
-                # Паттерн 2: название[-] количество[шт|м.|м|штук]
-                match = re.match(
-                    r"^(.+?)[-\s]+(\d{1,3})\s*(?:шт\.?|штук|м\.?|метр\.?)?\s*$",
-                    line,
-                    re.IGNORECASE,
-                )
-                if match:
-                    sku = match.group(1).strip().rstrip("-")
-                    qty = int(match.group(2))
+                # Паттерн 2: формат СТ "/число/" - количество в слешах
+                match_st = re.search(r"/(\d{1,4})/\s*$", line)
+                if match_st:
+                    qty = int(match_st.group(1))
+                    sku = re.sub(r"\s*/\d+/\s*$", "", line).strip()
                 else:
-                    # Fallback: число 1-999 в конце через пробел
-                    match2 = re.match(r"^(.+?)\s+(\d{1,3})\s*$", line)
-                    if match2:
-                        sku = match2.group(1).strip()
-                        qty = int(match2.group(2))
+                    # Паттерн 3: название[-] количество[шт|м.|м|штук]
+                    match = re.match(
+                        r"^(.+?)[-\s]+(\d{1,4})\s*(?:шт\.?|штук|м\.?|метр\.?)?\s*$",
+                        line,
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        sku = match.group(1).strip().rstrip("-")
+                        qty = int(match.group(2))
                     else:
-                        sku = line
-                        qty = 1
+                        # Fallback: число 1-9999 в конце через пробел
+                        match2 = re.match(r"^(.+?)\s+(\d{1,4})\s*$", line)
+                        if match2:
+                            sku = match2.group(1).strip()
+                            qty = int(match2.group(2))
+                        else:
+                            sku = line
+                            qty = 1
 
         if sku:
             items.append({"sku": sku, "name": "", "qty": qty})
