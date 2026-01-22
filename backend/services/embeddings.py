@@ -7,18 +7,29 @@ v6.0: Использование OpenAI API (via OpenRouter) вместо лок
 """
 
 import logging
+import time
+
 from backend.models.database import get_supabase_client
 from backend.utils.matching_helpers import prepare_embedding_text
-from backend.utils.openai_client import generate_embedding
+from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingMatcher:
-    """Семантический поиск товаров через pgvector (PostgreSQL) + OpenAI Embeddings"""
+    """Семантический поиск через FastEmbed (ONNX Local) + pgvector.
+    Вектор: 384 dimensions (model: paraphrase-multilingual-MiniLM-L12-v2)
+    """
 
     def __init__(self):
         self.db = get_supabase_client()
+        logger.info(
+            "📥 Loading FastEmbed model (sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2)..."
+        )
+        # Инициализация модели (скачивается один раз автоматически)
+        self.model = TextEmbedding(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        )
         self._initialized = True
 
     def build_index(self, products: list[dict]) -> None:
@@ -29,17 +40,19 @@ class EmbeddingMatcher:
     ) -> list[tuple[dict, float]]:
         """
         Семантический поиск товаров.
-        Если API ключа нет или он невалиден — возвращает пустой список.
         """
         # 1. Подготовка текста
         embedding_text = prepare_embedding_text(query)
         if not embedding_text:
             return []
 
-        # 2. Генерация (с защитой от ошибок)
-        query_embedding = generate_embedding(embedding_text)
-        if not query_embedding:
-            # logger.warning(f"Embedding skipped for: {query}") # Silently skip to reduce noise
+        # 2. Генерация через FastEmbed (быстрая, CPU)
+        try:
+            # list(generate) возвращает список векторов (нам нужен первый)
+            embeddings = list(self.model.embed([embedding_text]))
+            query_embedding = embeddings[0].tolist()
+        except Exception as e:
+            logger.error(f"FastEmbed generation failed: {e}")
             return []
 
         # 3. Поиск в БД
@@ -76,7 +89,7 @@ class EmbeddingMatcher:
 
     @property
     def is_ready(self) -> bool:
-        return True
+        return self._initialized
 
 
 # Singleton

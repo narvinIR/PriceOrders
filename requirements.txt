@@ -24,8 +24,8 @@ pydantic>=2.5.0
 pydantic-settings>=2.1.0
 httpx>=0.25.0
 
-# ML Matching (serverless embeddings via OpenAI/OpenRouter)
-openai>=1.0.0
+# ML Matching (FastEmbed - lightweight ONNX local model)
+fastembed>=0.2.0
 
 # Telegram Bot
 aiogram>=3.4.0

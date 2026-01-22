@@ -6,11 +6,11 @@ create extension if not exists vector;
 do $$
 begin
     if not exists (select 1 from information_schema.columns where table_name = 'products' and column_name = 'embedding') then
-        alter table products add column embedding vector(1536);
+        alter table products add column embedding vector(384);
     else
         -- If exists with wrong dimension, drop and recreate
         alter table products drop column embedding;
-        alter table products add column embedding vector(1536);
+        alter table products add column embedding vector(384);
     end if;
 end $$;
 
@@ -22,7 +22,7 @@ drop function if exists match_products(vector, double precision, integer);
 drop function if exists match_products(vector, float, int);
 
 create or replace function match_products (
-  query_embedding vector(1536),
+  query_embedding vector(384),
   match_threshold float,
   match_count int
 )
