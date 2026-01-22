@@ -2,13 +2,14 @@
 Обработчик интерактивного поиска товаров.
 """
 import time
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
 from uuid import uuid4
 
-from bot.keyboards.inline import get_match_keyboard
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, Message
+
 from bot.handlers.upload import get_matcher
+from bot.keyboards.inline import get_match_keyboard
 
 router = Router()
 

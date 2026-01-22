@@ -1,4 +1,5 @@
-from supabase import create_client, Client
+from supabase import Client, create_client
+
 from backend.config import settings
 
 _supabase_client: Client | None = None

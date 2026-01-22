@@ -6,8 +6,8 @@ import base64
 import json
 import logging
 import re
+
 import httpx
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -176,10 +176,10 @@ class OCRService:
 
 
 # Singleton
-_ocr_service: Optional[OCRService] = None
+_ocr_service: OCRService | None = None
 
 
-def get_ocr_service() -> Optional[OCRService]:
+def get_ocr_service() -> OCRService | None:
     """Получить глобальный экземпляр OCRService"""
     global _ocr_service
     if _ocr_service is None:

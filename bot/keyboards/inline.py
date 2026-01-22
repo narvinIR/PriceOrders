@@ -1,7 +1,7 @@
 """
 Inline клавиатуры для бота.
 """
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def get_match_keyboard(search_id: str, needs_review: bool = True) -> InlineKeyboardMarkup:

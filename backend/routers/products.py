@@ -1,5 +1,7 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
 from uuid import UUID
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+
 from backend.models.database import get_supabase_client
 from backend.models.schemas import Product, ProductCreate, ProductUpdate
 from backend.services.excel import ExcelService

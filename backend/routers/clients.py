@@ -1,5 +1,7 @@
-from fastapi import APIRouter, HTTPException
 from uuid import UUID
+
+from fastapi import APIRouter, HTTPException
+
 from backend.models.database import get_supabase_client
 from backend.models.schemas import Client, ClientCreate
 

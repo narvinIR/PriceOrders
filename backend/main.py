@@ -1,10 +1,10 @@
-import os
 import logging
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.routers import (
-    products_router, clients_router, orders_router, analytics_router
-)
+
+from backend.routers import analytics_router, clients_router, orders_router, products_router
 
 logging.basicConfig(
     level=logging.INFO,

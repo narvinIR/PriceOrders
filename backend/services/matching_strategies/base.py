@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict, Any
-from uuid import UUID
+from typing import Any
+
 from backend.models.schemas import MatchResult
+
 
 class MatchingStrategy(ABC):
     """Abstract base class for matching strategies."""
@@ -10,10 +11,10 @@ class MatchingStrategy(ABC):
     def match(
         self,
         client_sku: str,
-        client_name: Optional[str],
-        products: List[Dict[str, Any]],
-        mappings: Dict[str, Any]
-    ) -> Optional[MatchResult]:
+        client_name: str | None,
+        products: list[dict[str, Any]],
+        mappings: dict[str, Any]
+    ) -> MatchResult | None:
         """
         Attempt to match a client item to a product.
 

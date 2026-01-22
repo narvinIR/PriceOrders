@@ -5,15 +5,15 @@
 """
 
 import asyncio
+import logging
 import os
 import re
-import logging
 import tempfile
 from datetime import datetime
-from uuid import uuid4
-from aiogram import Router, F, Bot
-from aiogram.types import Message, FSInputFile
+
 import pandas as pd
+from aiogram import Bot, F, Router
+from aiogram.types import FSInputFile, Message
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ async def _process_items_parallel(items: list) -> tuple[list, int, int]:
         results = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True), timeout=180.0
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("⏰ Timeout при обработке заказа (180 сек)")
         # Возвращаем частичные результаты
         results = [
@@ -373,7 +373,7 @@ async def handle_document(message: Message, bot: Bot):
 
         # Собираем items
         items = []
-        for idx, row in df.iterrows():
+        for _idx, row in df.iterrows():
             sku = str(row.get(sku_col, "")).strip() if sku_col else ""
             name = str(row.get(name_col, "")).strip() if name_col else ""
 

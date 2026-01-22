@@ -2,8 +2,9 @@
 Конфигурация Telegram бота PriceOrders.
 Паттерны из VlessReality: валидация обязательных переменных.
 """
-import os
 import logging
+import os
+
 from dotenv import load_dotenv
 
 load_dotenv()

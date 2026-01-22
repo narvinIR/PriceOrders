@@ -5,10 +5,16 @@ End-to-end тесты для полного цикла:
 3. Фильтры по типу, углу, резьбе, хомутам
 """
 import re
+
 import pytest
+
 from backend.services.matching import (
-    MatchingService, detect_client_category, extract_product_type,
-    extract_angle, extract_thread_type, extract_mm_from_clamp
+    MatchingService,
+    detect_client_category,
+    extract_angle,
+    extract_mm_from_clamp,
+    extract_product_type,
+    extract_thread_type,
 )
 
 

@@ -1,8 +1,9 @@
-import pandas as pd
 import re
 from io import BytesIO
-from uuid import UUID
 from typing import BinaryIO
+
+import pandas as pd
+
 from backend.models.schemas import OrderItemBase
 
 

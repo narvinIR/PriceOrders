@@ -36,8 +36,21 @@
 
 - `SUPABASE_SERVICE_ROLE_KEY` (JWT) — Полный доступ (bypass RLS)
 - `SUPABASE_URL` — REST API endpoint
+- `SUPABASE_ACCESS_TOKEN` (PAT) — Для MCP и Management API
 
----
+### MCP (Antigravity)
+
+**Server:** `supabase-priceorders`
+
+```bash
+# Основные инструменты
+mcp_supabase-priceorders_list_tables(schemas: ["public"])
+mcp_supabase-priceorders_execute_sql(query: "SELECT ...")
+mcp_supabase-priceorders_apply_migration(name: "...", query: "ALTER ...")
+mcp_supabase-priceorders_get_logs(service: "postgres")
+```
+
+> **Workflow:** [/supabase-mcp](.agent/workflows/supabase-mcp.md)
 
 ## �🚀 Deploys & Commands
 

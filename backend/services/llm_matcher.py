@@ -6,9 +6,8 @@ LLM-based matching через OpenRouter API.
 import json
 import logging
 import re
-import time
+
 import httpx
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +97,7 @@ class LLMMatcher:
     def __init__(self, api_key: str, model: str = "mistralai/mistral-small-3.1-24b-instruct"):
         self.api_key = api_key
         self.model = model
-        self.products_cache: Optional[str] = None
+        self.products_cache: str | None = None
         self._products_list: list[dict] = []
 
     def set_products(self, products: list[dict]) -> None:
@@ -117,7 +116,7 @@ class LLMMatcher:
         self.products_cache = "\n".join(lines)
         logger.info(f"✅ LLMMatcher: загружено {len(lines)} товаров")
 
-    def match(self, query: str) -> Optional[dict]:
+    def match(self, query: str) -> dict | None:
         """
         Найти товар через LLM.
 
@@ -225,7 +224,7 @@ class LLMMatcher:
             logger.error(f"LLM match error: {e}")
             return None
 
-    def get_product_by_sku(self, sku: str) -> Optional[dict]:
+    def get_product_by_sku(self, sku: str) -> dict | None:
         """Найти товар в кэше по SKU"""
         for p in self._products_list:
             if p.get('sku') == sku:
@@ -239,10 +238,10 @@ class LLMMatcher:
 
 
 # Singleton
-_llm_matcher: Optional[LLMMatcher] = None
+_llm_matcher: LLMMatcher | None = None
 
 
-def get_llm_matcher() -> Optional[LLMMatcher]:
+def get_llm_matcher() -> LLMMatcher | None:
     """Получить глобальный экземпляр LLMMatcher"""
     global _llm_matcher
     if _llm_matcher is None:

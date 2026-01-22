@@ -3,6 +3,7 @@
 По умолчанию без указания материала - канализационные (серые).
 """
 import sys
+
 sys.path.insert(0, '/home/dimas/projects/PriceOrders')
 
 from backend.services.matching import MatchingService, detect_client_category

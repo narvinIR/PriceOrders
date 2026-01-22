@@ -2,8 +2,9 @@
 Pytest fixtures для тестов PriceOrders.
 """
 import sys
-import pytest
 from uuid import UUID
+
+import pytest
 
 sys.path.insert(0, '/home/dimas/projects/PriceOrders')
 

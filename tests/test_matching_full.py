@@ -3,11 +3,13 @@
 Создаёт тестовые вариации названий товаров и проверяет matching.
 """
 import sys
+
 sys.path.insert(0, '/home/dimas/projects/PriceOrders')
 
 from uuid import UUID
-from backend.services.matching import MatchingService
+
 from backend.models.database import get_supabase_client
+from backend.services.matching import MatchingService
 
 # Тестовый client_id
 TEST_CLIENT_ID = UUID('00000000-0000-0000-0000-000000000001')

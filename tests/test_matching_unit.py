@@ -3,17 +3,18 @@ Unit тесты для backend/services/matching.py
 Тестирует каждый уровень matching алгоритма.
 """
 import sys
-import pytest
 from unittest.mock import MagicMock, patch
 from uuid import UUID
+
+import pytest
 
 sys.path.insert(0, '/home/dimas/projects/PriceOrders')
 
 from backend.services.matching import (
     MatchingService,
-    is_eco_product,
-    extract_mm_from_clamp,
     clamp_fits_mm,
+    extract_mm_from_clamp,
+    is_eco_product,
     normalize_equal_sizes,
 )
 

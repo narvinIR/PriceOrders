@@ -1,4 +1,11 @@
-from .products import router as products_router
+from .analytics import router as analytics_router
 from .clients import router as clients_router
 from .orders import router as orders_router
-from .analytics import router as analytics_router
+from .products import router as products_router
+
+__all__ = [
+    "analytics_router",
+    "clients_router",
+    "orders_router",
+    "products_router",
+]

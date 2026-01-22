@@ -7,6 +7,7 @@ from rapidfuzz import fuzz
 from backend.config import settings
 from backend.constants import CRITICAL_TYPES
 from backend.models.schemas import MatchResult
+from backend.services.embeddings import get_embedding_matcher
 from backend.services.matching_strategies.base import MatchingStrategy
 from backend.utils.matching_helpers import (
     detect_client_category,
@@ -52,9 +53,34 @@ class HybridStrategy(MatchingStrategy):
         client_type = extract_product_type(client_name)
         client_angle = extract_angle(client_name)
 
-        # We perform full scan with fuzzy matching + filters
+        # --- SEMANTIC PRE-FILTERING (pgvector) ---
+        # Use embedding matcher to narrow down candidates before fuzzy matching
+        # This reduces O(N) to O(k) where k << N, significantly improving performance
+        embedding_matcher = get_embedding_matcher()
+        candidate_products = products  # Default: use all products
+
+        try:
+            # Get top candidates from semantic search
+            semantic_results = embedding_matcher.search(
+                client_name, top_k=50, min_score=0.4
+            )
+            if semantic_results:
+                # Extract IDs of semantically similar products
+                candidate_ids = {str(m[0]["id"]) for m in semantic_results}
+                # Filter products to only those found by semantic search
+                filtered = [p for p in products if str(p["id"]) in candidate_ids]
+                if filtered:
+                    candidate_products = filtered
+                    logger.debug(
+                        f"Semantic pre-filter: {len(products)} -> {len(candidate_products)} candidates"
+                    )
+        except Exception as e:
+            # Fallback to full scan if embedding search fails
+            logger.warning(f"Semantic pre-filter failed, using full scan: {e}")
+
+        # We perform scan with fuzzy matching + filters on pre-filtered candidates
         matches = []
-        for product in products:
+        for product in candidate_products:
             # --- START FILTERING ---
             # 1. Pipe Size
             if client_size:

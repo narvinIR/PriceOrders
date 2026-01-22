@@ -1,17 +1,18 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Any
 from datetime import datetime
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 # Products
 class ProductBase(BaseModel):
     sku: str
     name: str
-    category: Optional[str] = None
-    brand: Optional[str] = None
+    category: str | None = None
+    brand: str | None = None
     unit: str = "шт"
-    price: Optional[float] = None
-    base_price: Optional[float] = None
+    price: float | None = None
+    base_price: float | None = None
     pack_qty: int = 1  # Количество в упаковке
     attributes: dict = Field(default_factory=dict)
 
@@ -19,13 +20,13 @@ class ProductCreate(ProductBase):
     pass
 
 class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    category: Optional[str] = None
-    brand: Optional[str] = None
-    unit: Optional[str] = None
-    price: Optional[float] = None
-    base_price: Optional[float] = None
-    attributes: Optional[dict] = None
+    name: str | None = None
+    category: str | None = None
+    brand: str | None = None
+    unit: str | None = None
+    price: float | None = None
+    base_price: float | None = None
+    attributes: dict | None = None
 
 class Product(ProductBase):
     id: UUID
@@ -37,9 +38,9 @@ class Product(ProductBase):
 # Clients
 class ClientBase(BaseModel):
     name: str
-    code: Optional[str] = None
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
+    code: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
     settings: dict = Field(default_factory=dict)
 
 class ClientCreate(ClientBase):
@@ -65,7 +66,7 @@ class MappingCreate(MappingBase):
 
 class Mapping(MappingBase):
     id: UUID
-    verified_at: Optional[datetime] = None
+    verified_at: datetime | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -73,26 +74,26 @@ class Mapping(MappingBase):
 # Orders
 class OrderItemBase(BaseModel):
     client_sku: str
-    client_name: Optional[str] = None
+    client_name: str | None = None
     quantity: float = 1.0
 
 class OrderItem(OrderItemBase):
     id: UUID
     order_id: UUID
-    mapped_product_id: Optional[UUID] = None
-    mapping_confidence: Optional[float] = None
-    mapping_type: Optional[str] = None
+    mapped_product_id: UUID | None = None
+    mapping_confidence: float | None = None
+    mapping_type: str | None = None
     needs_review: bool = False
     reviewed: bool = False
-    original_quantity: Optional[float] = None  # Исходное кол-во до округления
+    original_quantity: float | None = None  # Исходное кол-во до округления
     # Populated from join
-    product: Optional[Product] = None
+    product: Product | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class OrderBase(BaseModel):
     client_id: UUID
-    order_number: Optional[str] = None
+    order_number: str | None = None
     source: str = "excel"
 
 class OrderCreate(OrderBase):
@@ -101,20 +102,20 @@ class OrderCreate(OrderBase):
 class Order(OrderBase):
     id: UUID
     status: str
-    original_file_url: Optional[str] = None
+    original_file_url: str | None = None
     created_at: datetime
-    processed_at: Optional[datetime] = None
-    exported_at: Optional[datetime] = None
+    processed_at: datetime | None = None
+    exported_at: datetime | None = None
     items: list[OrderItem] = []
-    client: Optional[Client] = None
+    client: Client | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 # Matching Result
 class MatchResult(BaseModel):
-    product_id: Optional[UUID] = None
-    product_sku: Optional[str] = None
-    product_name: Optional[str] = None
+    product_id: UUID | None = None
+    product_sku: str | None = None
+    product_name: str | None = None
     confidence: float
     match_type: str
     needs_review: bool

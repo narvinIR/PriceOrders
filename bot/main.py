@@ -5,20 +5,18 @@ Telegram бот PriceOrders - сопоставление артикулов B2B.
 import asyncio
 import logging
 import time
-from contextlib import asynccontextmanager
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 
-from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-from aiogram.types import BotCommand
-from fastapi import FastAPI, BackgroundTasks
 import uvicorn
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
+from fastapi import BackgroundTasks, FastAPI
 
-from bot.config import (
-    BOT_TOKEN, WEBHOOK_MODE, WEBHOOK_URL, WEBHOOK_PATH, HOST, PORT
-)
-from bot.handlers import start, search, upload
+from bot.config import BOT_TOKEN, HOST, PORT, WEBHOOK_MODE, WEBHOOK_PATH, WEBHOOK_URL
+from bot.handlers import search, start, upload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,6 +78,7 @@ dp.shutdown.register(on_shutdown)
 def _warmup_matcher():
     """Синхронный прогрев для запуска в потоке (не блокирует event loop)"""
     import time
+
     from bot.handlers.upload import get_matcher
 
     start = time.time()
@@ -105,7 +104,7 @@ async def lifespan(app: FastAPI):
             timeout=120.0  # 2 минуты на прогрев
         )
         logger.info("✅ MatchingService полностью готов")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("❌ Таймаут прогрева ML модели (120 сек)")
     except Exception as e:
         logger.error(f"❌ Ошибка прогрева: {e}", exc_info=True)

@@ -2,10 +2,10 @@
 Тест matching для бота - эмулирует обработку текстового списка артикулов.
 """
 import sys
+
 sys.path.insert(0, '/home/dimas/projects/PriceOrders')
 
 from backend.services.matching import MatchingService
-from backend.models.schemas import MatchResult
 
 
 def test_bot_matching():
@@ -82,7 +82,7 @@ def test_bot_matching():
                 })
                 matched += 1
             else:
-                print(f"   ❌ Не найден")
+                print("   ❌ Не найден")
                 results.append({
                     'input': client_sku,
                     'sku': None,
