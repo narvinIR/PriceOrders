@@ -7,20 +7,25 @@ v6.0: Использование OpenAI API (via OpenRouter) вместо лок
 """
 
 import logging
+import time
 
 from backend.models.database import get_supabase_client
 from backend.utils.matching_helpers import prepare_embedding_text
-from backend.utils.openai_client import generate_embedding
+
+# Local ML Model
+from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingMatcher:
-    """Семантический поиск товаров через pgvector (PostgreSQL) + OpenAI Embeddings"""
+    """Семантический поиск товаров через pgvector (PostgreSQL) + Local Embeddings (rubert-tiny2)"""
 
     def __init__(self):
         self.db = get_supabase_client()
-        self._initialized = True  # Always ready (serverless)
+        logger.info("📥 Loading local embedding model (cointegrated/rubert-tiny2)...")
+        self.model = SentenceTransformer("cointegrated/rubert-tiny2")
+        self._initialized = True
 
     def build_index(self, products: list[dict]) -> None:
         """
@@ -47,10 +52,11 @@ class EmbeddingMatcher:
         if not embedding_text:
             return []
 
-        # Генерируем embedding через API (OpenAI/Cohere)
-        query_embedding = generate_embedding(embedding_text)
-        if not query_embedding:
-            logger.warning(f"Failed to generate embedding for: {query}")
+        # Генерируем embedding локально
+        try:
+            query_embedding = self.model.encode(embedding_text).tolist()
+        except Exception as e:
+            logger.error(f"Local embedding generation failed: {e}")
             return []
 
         # Вызываем RPC функцию match_products в PostgreSQL
@@ -71,18 +77,6 @@ class EmbeddingMatcher:
                     "id": row["id"],
                     "sku": row["sku"],
                     "name": row["name"],
-                    # Note: match_products RPC might not return category/pack_qty if not requested.
-                    # We might need to fetch them or adjust RPC.
-                    # Assuming basic info is enough or RPC returns what we need.
-                    # If RPC returns only id/sku/name, we might miss category/pack_qty used by filters.
-                    # Let's hope HybridStrategy handles missing fields gracefully or fetches them.
-                    # Actually, HybridStrategy takes `products` list as input matching input.
-                    # But `EmbeddingMatcher.search` returns specific product dicts.
-                    # If these dicts lack 'pack_qty' etc, filtering might fail.
-                    # Ideally, we should lookup the full product from `products` cache using ID if possible.
-                    # But EmbeddingMatcher is standalone.
-                    # Let's add extra fields to RPC if possible, or live with it.
-                    # Current RPC in setup_pgvector.py returns: id, sku, name, similarity.
                 }
                 matches.append((product, row["similarity"]))
 
@@ -100,7 +94,7 @@ class EmbeddingMatcher:
 
     @property
     def is_ready(self) -> bool:
-        return True
+        return self._initialized
 
 
 # Singleton
