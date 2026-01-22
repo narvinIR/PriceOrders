@@ -7,59 +7,42 @@ v6.0: Использование OpenAI API (via OpenRouter) вместо лок
 """
 
 import logging
-import time
-
 from backend.models.database import get_supabase_client
 from backend.utils.matching_helpers import prepare_embedding_text
-
-# Local ML Model
-from sentence_transformers import SentenceTransformer
+from backend.utils.openai_client import generate_embedding
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingMatcher:
-    """Семантический поиск товаров через pgvector (PostgreSQL) + Local Embeddings (rubert-tiny2)"""
+    """Семантический поиск товаров через pgvector (PostgreSQL) + OpenAI Embeddings"""
 
     def __init__(self):
         self.db = get_supabase_client()
-        logger.info("📥 Loading local embedding model (cointegrated/rubert-tiny2)...")
-        self.model = SentenceTransformer("cointegrated/rubert-tiny2")
         self._initialized = True
 
     def build_index(self, products: list[dict]) -> None:
-        """
-        DEPRECATED: Индекс теперь в PostgreSQL (HNSW).
-        """
         pass
 
     def search(
         self, query: str, top_k: int = 5, min_score: float = 0.5
     ) -> list[tuple[dict, float]]:
         """
-        Семантический поиск товаров через pgvector.
-
-        Args:
-            query: Текст запроса (название товара)
-            top_k: Количество результатов
-            min_score: Минимальный порог сходства (0-1)
-
-        Returns:
-            Список (product, score) отсортированный по убыванию сходства
+        Семантический поиск товаров.
+        Если API ключа нет или он невалиден — возвращает пустой список.
         """
-        # Используем единую логику подготовки текста
+        # 1. Подготовка текста
         embedding_text = prepare_embedding_text(query)
         if not embedding_text:
             return []
 
-        # Генерируем embedding локально
-        try:
-            query_embedding = self.model.encode(embedding_text).tolist()
-        except Exception as e:
-            logger.error(f"Local embedding generation failed: {e}")
+        # 2. Генерация (с защитой от ошибок)
+        query_embedding = generate_embedding(embedding_text)
+        if not query_embedding:
+            # logger.warning(f"Embedding skipped for: {query}") # Silently skip to reduce noise
             return []
 
-        # Вызываем RPC функцию match_products в PostgreSQL
+        # 3. Поиск в БД
         try:
             result = self.db.rpc(
                 "match_products",
@@ -70,7 +53,6 @@ class EmbeddingMatcher:
                 },
             ).execute()
 
-            # Преобразуем результат в формат (product, score)
             matches = []
             for row in result.data:
                 product = {
@@ -94,7 +76,7 @@ class EmbeddingMatcher:
 
     @property
     def is_ready(self) -> bool:
-        return self._initialized
+        return True
 
 
 # Singleton
