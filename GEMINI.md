@@ -46,9 +46,15 @@
 # Основные инструменты
 mcp_supabase-priceorders_list_tables(schemas: ["public"])
 mcp_supabase-priceorders_execute_sql(query: "SELECT ...")
+
 mcp_supabase-priceorders_apply_migration(name: "...", query: "ALTER ...")
-mcp_supabase-priceorders_get_logs(service: "postgres")
 ```
+
+**ML Search:**
+
+- Имплементирован через `pgvector` + OpenAI embeddings
+- Для работы нужен валидный `OPENROUTER_API_KEY` или `OPENAI_API_KEY`
+- Скрипт генерации: `python3 scripts/generate_embeddings_openai.py`
 
 > **Workflow:** [/supabase-mcp](.agent/workflows/supabase-mcp.md)
 
