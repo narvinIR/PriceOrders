@@ -77,6 +77,18 @@ def normalize_angle(angle: int | None) -> int | None:
     return angle
 
 
+def extract_color(name: str) -> str | None:
+    """Извлечь цвет из названия"""
+    name_lower = name.lower()
+    if any(x in name_lower for x in ["бел", "white"]):
+        return "white"
+    if any(x in name_lower for x in ["сер", "gray", "grey"]):
+        return "gray"
+    if any(x in name_lower for x in ["рыж", "оранж", "red", "orange"]):
+        return "red"
+    return None
+
+
 def extract_thread_type(name: str) -> str | None:
     name_lower = name.lower()
     if any(

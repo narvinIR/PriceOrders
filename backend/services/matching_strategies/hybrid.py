@@ -12,6 +12,7 @@ from backend.services.matching_strategies.base import MatchingStrategy
 from backend.utils.matching_helpers import (
     detect_client_category,
     extract_angle,
+    extract_color,
     extract_product_type,
     filter_by_category,
     normalize_angle,
@@ -109,6 +110,30 @@ class HybridStrategy(MatchingStrategy):
                             continue
                     elif norm_product != norm_client:
                         continue
+
+            # 4. Color (Strict if specified)
+            # Fix for White (Prestige) vs Gray (Sewer)
+            # If client specifies "белый", we skip "серый" products completely
+            if extract_color(client_name):
+                client_color = extract_color(client_name)
+                product_color = extract_color(product["name"])
+                # If product also has a color, they must match
+                if product_color and client_color != product_color:
+                    continue
+
+                # Extra check for Prestige vs Sewer implicit colors
+                # "Sewer" usually means Gray, "Prestige" usually means White
+                # If client wants White/Prestige, skip 202... (Sewer Gray)
+                if client_color == "white" and product["sku"].startswith("202"):
+                    continue
+                # If client wants Gray/Sewer, skip 403... (Prestige White)
+                if client_color == "gray" and product["sku"].startswith("403"):
+                    continue
+                # If client wants Red/Outdoor, skip 202/403
+                if client_color == "red" and (
+                    product["sku"].startswith("202") or product["sku"].startswith("403")
+                ):
+                    continue
 
             # --- END FILTERING ---
 
