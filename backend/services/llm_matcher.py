@@ -144,20 +144,32 @@ class LLMMatcher:
                             full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
                         ),
                         loop,
-                    ).result()
+                    ).result(timeout=15)
                 else:
-                    text_content = asyncio.run(
-                        self.router.completion(
-                            full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
+
+                    async def run_with_timeout():
+                        return await asyncio.wait_for(
+                            self.router.completion(
+                                full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
+                            ),
+                            timeout=15,
                         )
-                    )
+
+                    text_content = asyncio.run(run_with_timeout())
             except RuntimeError:
                 # No loop running
-                text_content = asyncio.run(
-                    self.router.completion(
-                        full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
+                async def run_with_timeout():
+                    return await asyncio.wait_for(
+                        self.router.completion(
+                            full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
+                        ),
+                        timeout=15,
                     )
-                )
+
+                text_content = asyncio.run(run_with_timeout())
+            except Exception as e:
+                logger.warning(f"LLM Execution Timeout or Error: {e}")
+                text_content = None
 
             duration = time.time() - start_time
 
