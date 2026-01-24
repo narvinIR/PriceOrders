@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     # Google Gemini Embeddings (Free, 0 RAM)
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
 
-    # LLM Matching (OpenRouter) - optional for chat/OCR
+    # LLM Matching (OpenRouter is OPTIONAL now, primary is Google Relay)
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
-    llm_model: str = os.getenv("LLM_MODEL_V2", "google/gemini-2.0-flash-exp:free")
+    llm_model: str = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-001")
 
     # OCR для рукописных заказов (Vision LLM)
     ocr_model: str = os.getenv("OCR_MODEL", "qwen/qwen3-vl-32b-instruct")
