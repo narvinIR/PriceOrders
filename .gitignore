@@ -45,3 +45,4 @@ RESEARCH_PROMPT.md
 test_ocr*.py
 photo_*.jpg
 *:Zone.Identifier
+node_modules/

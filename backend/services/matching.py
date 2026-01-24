@@ -27,6 +27,7 @@ from backend.utils.normalizers import normalize_sku
 
 logger = logging.getLogger(__name__)
 
+
 class MatchingService:
     """Refactored MatchingService using Strategy Pattern"""
 
@@ -38,15 +39,15 @@ class MatchingService:
         self._stats_lock = Lock()
         self._embedding_matcher = get_embedding_matcher()
         self._stats = {
-            'total': 0,
-            'exact_sku': 0,
-            'exact_name': 0,
-            'cached_mapping': 0,
-            'fuzzy_sku': 0,
-            'fuzzy_name': 0,
-            'llm_match': 0,
-            'not_found': 0,
-            'total_confidence': 0.0,
+            "total": 0,
+            "exact_sku": 0,
+            "exact_name": 0,
+            "cached_mapping": 0,
+            "fuzzy_sku": 0,
+            "fuzzy_name": 0,
+            "llm_match": 0,
+            "not_found": 0,
+            "total_confidence": 0.0,
         }
 
         # Initialize Strategies
@@ -56,22 +57,18 @@ class MatchingService:
             CachedMappingStrategy(),
             FuzzySkuStrategy(),
             HybridStrategy(),
-            LlmStrategy()
+            LlmStrategy(),
         ]
 
     def _load_products(self) -> list[dict]:
         """Загрузка каталога товаров и построение embedding индекса"""
         if self._products_cache is None:
-            response = self.db.table('products').select('*').execute()
+            response = self.db.table("products").select("*").execute()
             self._products_cache = response.data or []
             if settings.enable_ml_matching:
                 if self._products_cache and not self._embedding_matcher.is_ready:
-                    try:
-                        logger.info("🔧 Загрузка ML модели для semantic matching...")
-                        self._embedding_matcher.build_index(self._products_cache)
-                        logger.info("✅ ML модель загружена")
-                    except Exception as e:
-                        logger.warning(f"⚠️ ML matching недоступен: {e}")
+                    # EmbeddingMatcher (Relay) does not need build_index
+                    pass
         return self._products_cache
 
     def _load_client_mappings(self, client_id: UUID | None) -> dict:
@@ -81,14 +78,15 @@ class MatchingService:
         client_key = str(client_id)
         with self._mappings_lock:
             if client_key not in self._mappings_cache:
-                response = self.db.table('mappings')\
-                    .select('client_sku, product_id, confidence, match_type')\
-                    .eq('client_id', str(client_id))\
-                    .eq('verified', True)\
+                response = (
+                    self.db.table("mappings")
+                    .select("client_sku, product_id, confidence, match_type")
+                    .eq("client_id", str(client_id))
+                    .eq("verified", True)
                     .execute()
+                )
                 self._mappings_cache[client_key] = {
-                    normalize_sku(m['client_sku']): m
-                    for m in (response.data or [])
+                    normalize_sku(m["client_sku"]): m for m in (response.data or [])
                 }
             return self._mappings_cache[client_key]
 
@@ -101,16 +99,16 @@ class MatchingService:
     def get_stats(self) -> dict:
         """Получить статистику matching"""
         stats = self._stats.copy()
-        if stats['total'] > 0:
-            stats['avg_confidence'] = round(
-                stats['total_confidence'] / stats['total'], 1
+        if stats["total"] > 0:
+            stats["avg_confidence"] = round(
+                stats["total_confidence"] / stats["total"], 1
             )
-            stats['success_rate'] = round(
-                100 * (stats['total'] - stats['not_found']) / stats['total'], 1
+            stats["success_rate"] = round(
+                100 * (stats["total"] - stats["not_found"]) / stats["total"], 1
             )
         else:
-            stats['avg_confidence'] = 0.0
-            stats['success_rate'] = 0.0
+            stats["avg_confidence"] = 0.0
+            stats["success_rate"] = 0.0
         return stats
 
     def reset_stats(self):
@@ -119,24 +117,31 @@ class MatchingService:
             for key in self._stats:
                 self._stats[key] = 0 if isinstance(self._stats[key], int) else 0.0
 
-    def save_mapping(self, client_id: UUID, client_sku: str, product_id: UUID,
-                     confidence: float, match_type: str, verified: bool = False):
+    def save_mapping(
+        self,
+        client_id: UUID,
+        client_sku: str,
+        product_id: UUID,
+        confidence: float,
+        match_type: str,
+        verified: bool = False,
+    ):
         """Сохранение маппинга в БД (UPSERT)"""
         from datetime import datetime
+
         data = {
-            'client_id': str(client_id),
-            'client_sku': client_sku,
-            'product_id': str(product_id),
-            'confidence': confidence,
-            'match_type': match_type,
-            'verified': verified
+            "client_id": str(client_id),
+            "client_sku": client_sku,
+            "product_id": str(product_id),
+            "confidence": confidence,
+            "match_type": match_type,
+            "verified": verified,
         }
         if verified:
-            data['verified_at'] = datetime.utcnow().isoformat()
+            data["verified_at"] = datetime.utcnow().isoformat()
 
-        self.db.table('mappings').upsert(
-            data,
-            on_conflict='client_id,client_sku'
+        self.db.table("mappings").upsert(
+            data, on_conflict="client_id,client_sku"
         ).execute()
 
         # Инвалидируем кэш клиента
@@ -148,8 +153,8 @@ class MatchingService:
     def _update_stats(self, match: MatchResult):
         """Обновить статистику после match (thread-safe)"""
         with self._stats_lock:
-            self._stats['total'] += 1
-            self._stats['total_confidence'] += match.confidence
+            self._stats["total"] += 1
+            self._stats["total_confidence"] += match.confidence
             if match.match_type in self._stats:
                 self._stats[match.match_type] += 1
 
@@ -165,7 +170,9 @@ class MatchingService:
             logger.warning(f"Not found: {match.match_type}")
         return match
 
-    def match_item(self, client_id: UUID | None, client_sku: str, client_name: str = None) -> MatchResult:
+    def match_item(
+        self, client_id: UUID | None, client_sku: str, client_name: str = None
+    ) -> MatchResult:
         """
         Refactored match_item using strategies.
         """
@@ -200,6 +207,7 @@ class MatchingService:
         # Actually, let's look at `backend/services/llm_matcher.py`, it has `get_llm_matcher`.
 
         from backend.services.llm_matcher import get_llm_matcher
+
         get_llm_matcher()
         # Note: Original code logic for LLM
         # It ran if nothing else matched or confidence was low?
@@ -245,24 +253,34 @@ class MatchingService:
         # but `llm_matcher.py` might handle it or `settings` has it.
         # Original code used `backend/services/llm_matcher.py`.
 
-        return self._finalize_match(MatchResult(
-            product_id=None,
-            product_sku=client_sku,
-            product_name=client_name,
-            confidence=0.0,
-            match_type="not_found",
-            needs_review=True
-        ))
+        return self._finalize_match(
+            MatchResult(
+                product_id=None,
+                product_sku=client_sku,
+                product_name=client_name,
+                confidence=0.0,
+                match_type="not_found",
+                needs_review=True,
+            )
+        )
+
 
 # Functions required for backward compatibility imports
 def filter_by_product_type(matches: list, client_type: str | None) -> list:
     if not matches or not client_type or len(matches) <= 1:
         return matches
     is_tuple = isinstance(matches[0], tuple)
+
     def get_product(m):
         return m[0] if is_tuple else m
-    filtered = [m for m in matches if extract_product_type(get_product(m)['name']) == client_type]
+
+    filtered = [
+        m
+        for m in matches
+        if extract_product_type(get_product(m)["name"]) == client_type
+    ]
     return filtered if filtered else matches
+
 
 # Add other filters if they were used externally...
 # Checking grep results:
@@ -270,4 +288,3 @@ def filter_by_product_type(matches: list, client_type: str | None) -> list:
 # then lists...
 # I need to know WHAT test_e2e_matching imports.
 # I'll read test_e2e_matching.py to see what it imports.
-

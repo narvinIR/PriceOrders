@@ -11,7 +11,7 @@ import re
 import tempfile
 from datetime import datetime
 
-import pandas as pd
+
 from aiogram import Bot, F, Router
 from aiogram.types import FSInputFile, Message
 
@@ -156,13 +156,14 @@ async def _process_items_parallel(items: list) -> tuple[list, int, int]:
     return list(results), matched, not_found
 
 
+# Remove pandas import at top level first (done via separate edit or manually?
+# I will supply the full replacement of process_items and top imports in two chunks if needed.
+# Since I can't do multiple chunks easily without MultiReplace, I'll do process_items here and assume import removal later or now.)
+
+
 async def process_items(message: Message, items: list):
     """
     Обработка списка артикулов и вывод результата в Excel.
-
-    Args:
-        message: Telegram message
-        items: список dict с ключами 'sku', 'name', 'qty'
     """
     if not items:
         await message.answer("❌ Не найдено позиций для обработки")
@@ -181,45 +182,54 @@ async def process_items(message: Message, items: list):
 
     logger.info(f"✅ Matching: {matched} найдено, {not_found} не найдено")
 
-    # Создаём Excel файл
-    df = pd.DataFrame(results)
+    # Создаём Excel файл (через API ExcelService без pandas)
+    from backend.services.excel import ExcelService
+
+    # Prepare data for export
+    export_data = []
+    for r in results:
+        # Adapt result dict to structure expected by ExcelService or use dict directly if compatible
+        # result dict structure from _match_single_item:
+        # {"Запрос": ..., "Артикул Jakko": ..., ... "Точность": ...}
+        # ExcelService.export_order expects:
+        # {'client_sku', 'client_name', 'quantity', 'match': {'product_sku', ...}}
+
+        # We need to adapt existing `results` format to what `ExcelService.export_order` expects,
+        # OR update `ExcelService.export_order` to handle flat dicts?
+        # Better: let's rewrite `process_items` logic to construct the list for `ExcelService`.
+
+        # Accessing keys from `_match_single_item`:
+        item_data = {
+            "client_sku": r.get("Запрос", ""),
+            "client_name": "",  # "Запрос" usually holds sku or name
+            "quantity": r.get("Исх. кол-во", 1),
+            "match": {
+                "product_sku": r.get("Артикул Jakko", ""),
+                "product_name": r.get("Название Jakko", ""),
+                "pack_qty": r.get("Упаковка", 1),
+                "confidence": r.get("Точность", "0%").replace("%", ""),
+                "match_type": r.get("Метод", ""),
+                "needs_review": "NO_MATCH" in str(r.get("Артикул Jakko", ""))
+                or int(r.get("Точность", "0%").replace("%", "")) < 80,
+            },
+        }
+        export_data.append(item_data)
+
+    excel_bytes = ExcelService.export_order(export_data)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"jakko_order_{timestamp}.xlsx"
 
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        tmp_path = tmp.name
+    # Send document
+    from aiogram.types import BufferedInputFile
 
-    try:
-        # Сохраняем с форматированием
-        with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Заказ")
-            worksheet = writer.sheets["Заказ"]
-            # Ширина колонок
-            worksheet.column_dimensions["A"].width = 25  # Запрос
-            worksheet.column_dimensions["B"].width = 15  # Артикул
-            worksheet.column_dimensions["C"].width = 50  # Название
-            worksheet.column_dimensions["D"].width = 10  # Исх. кол-во
-            worksheet.column_dimensions["E"].width = 10  # Кол-во
-            worksheet.column_dimensions["F"].width = 10  # Упаковка
-            worksheet.column_dimensions["G"].width = 10  # Точность
-            worksheet.column_dimensions["H"].width = 15  # Метод
+    doc = BufferedInputFile(excel_bytes, filename=filename)
 
-        # Отправляем файл
-        logger.info("📤 Отправляю результат...")
-        await message.answer(
-            f"✅ <b>Готово!</b>\n\n"
-            f"📦 Найдено: {matched} из {len(items)}\n"
-            f"❌ Не найдено: {not_found}"
-        )
-
-        doc = FSInputFile(tmp_path, filename=filename)
-        await message.answer_document(doc, caption="📎 Ваш заказ готов")
-        logger.info("✅ Файл отправлен!")
-    finally:
-        # Удаляем временный файл
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+    await message.answer_document(
+        doc,
+        caption=f"✅ <b>Готово!</b>\n📦 Найдено: {matched}\n❌ Не найдено: {not_found}",
+    )
+    logger.info("✅ Файл отправлен!")
 
 
 @router.message(F.photo)
@@ -271,7 +281,6 @@ async def handle_document(message: Message, bot: Bot):
     document = message.document
     filename = document.file_name.lower()
 
-    # Проверяем размер файла (защита от DoS)
     if document.file_size and document.file_size > MAX_FILE_SIZE:
         await message.answer(
             f"⚠️ Файл слишком большой ({document.file_size // 1024 // 1024} MB).\n"
@@ -279,38 +288,17 @@ async def handle_document(message: Message, bot: Bot):
         )
         return
 
-    # Проверяем тип файла
-    # Изображения → OCR
-    if filename.endswith((".jpg", ".jpeg", ".png", ".webp")):
-        await message.answer("📷 Получил фото, распознаю текст...")
-        try:
-            file = await bot.get_file(document.file_id)
-            file_bytes = await bot.download_file(file.file_path)
-            image_bytes = (
-                file_bytes.read() if hasattr(file_bytes, "read") else file_bytes
-            )
-
-            from backend.services.ocr_service import get_ocr_service
-
-            ocr = get_ocr_service()
-            if not ocr:
-                await message.answer("❌ OCR не настроен")
-                return
-
-            items = ocr.recognize_order(image_bytes)
-            if not items:
-                await message.answer("❌ Не удалось распознать текст на фото")
-                return
-
-            logger.info(f"OCR (document): распознано {len(items)} позиций")
-            await process_items(message, items)
-        except Exception as e:
-            logger.error(f"Ошибка OCR: {e}", exc_info=True)
-            await message.answer(f"❌ Ошибка распознавания: {e}")
-        return
-
-    # Excel/CSV
+    # Excel/CSV processing
     if not filename.endswith((".xlsx", ".xls", ".csv")):
+        # Check if image for OCR (moved here for cleaner logic flow)
+        if filename.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            await message.answer("📷 Получил фото, распознаю текст...")
+            # ... existing OCR logic (omitted for brevity if unchanged, but need to keep it?)
+            # The user asked to remove pandas.
+            # I should keep OCR logic but cleaner.
+            # For now, let's just focus on Excel/CSV part.
+            return await handle_photo_doc(message, bot)  # delegating
+
         await message.answer(
             "⚠️ Поддерживаются: Excel, CSV, фото\n\n" "Или отправьте текст с артикулами."
         )
@@ -318,87 +306,71 @@ async def handle_document(message: Message, bot: Bot):
 
     await message.answer("📥 Получил файл, обрабатываю...")
 
+    tmp_path = None
     try:
-        # Определяем расширение для временного файла
         suffix = ".csv" if filename.endswith(".csv") else ".xlsx"
-
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             await bot.download(document, tmp.name)
             tmp_path = tmp.name
 
-        # Парсим файл
-        if filename.endswith(".csv"):
-            # Пробуем разные encoding и разделители
-            encodings = ["utf-8", "cp1251", "utf-8-sig", "latin-1"]
-            df = None
-            for enc in encodings:
-                for sep in [";", ",", "\t"]:
-                    try:
-                        df = pd.read_csv(tmp_path, sep=sep, encoding=enc)
-                        if len(df.columns) > 1:
-                            break
-                    except Exception:
-                        continue
-                if df is not None and len(df.columns) > 1:
-                    break
-            if df is None:
-                df = pd.read_csv(tmp_path)  # fallback
-        else:
-            df = pd.read_excel(tmp_path)
+        # Используем ExcelService (без pandas)
+        from backend.services.excel import ExcelService
 
-        # Ищем колонки
-        sku_col = None
-        name_col = None
-        qty_col = None
+        with open(tmp_path, "rb") as f:
+            # ExcelService возвращает список OrderItemBase
+            order_items = ExcelService.parse_order_file(f, filename)
 
-        for col in df.columns:
-            col_lower = str(col).lower()
-            if any(x in col_lower for x in ["артикул", "sku", "код", "арт"]):
-                sku_col = col
-            elif any(
-                x in col_lower for x in ["название", "наименование", "name", "товар"]
-            ):
-                name_col = col
-            elif any(
-                x in col_lower for x in ["количество", "кол-во", "qty", "шт", "кол"]
-            ):
-                qty_col = col
-
-        # Если не нашли колонки, берём первую как артикул
-        if not sku_col and not name_col:
-            if len(df.columns) >= 1:
-                sku_col = df.columns[0]
-            if len(df.columns) >= 2:
-                qty_col = df.columns[1]
-
-        # Собираем items
         items = []
-        for _idx, row in df.iterrows():
-            sku = str(row.get(sku_col, "")).strip() if sku_col else ""
-            name = str(row.get(name_col, "")).strip() if name_col else ""
+        for item in order_items:
+            # Convert OrderItemBase to dict for internal processing
+            items.append(
+                {
+                    "sku": item.client_sku,
+                    "name": item.client_name,
+                    "qty": int(item.quantity),
+                }
+            )
 
-            # Парсим количество
-            qty_raw = row.get(qty_col, 1) if qty_col else 1
-            try:
-                qty = int(float(qty_raw)) if pd.notna(qty_raw) else 1
-            except (ValueError, TypeError):
-                qty = 1
+        logger.info(f"✅ Parsed {len(items)} items from {filename}")
 
-            if sku or name:
-                items.append({"sku": sku, "name": name, "qty": qty})
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
-        os.unlink(tmp_path)
         await process_items(message, items)
 
     except Exception as e:
-        # Очищаем временный файл при ошибке
-        if "tmp_path" in locals() and os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
             except Exception:
                 pass
         logger.error(f"❌ Ошибка обработки файла: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка обработки файла: {e}")
+
+
+# Separate OCR handler for documents to keep main handler clean
+async def handle_photo_doc(message: Message, bot: Bot):
+    try:
+        file = await bot.get_file(message.document.file_id)
+        file_bytes = await bot.download_file(file.file_path)
+        image_bytes = file_bytes.read() if hasattr(file_bytes, "read") else file_bytes
+
+        from backend.services.ocr_service import get_ocr_service
+
+        ocr = get_ocr_service()
+        if not ocr:
+            await message.answer("❌ OCR не настроен")
+            return
+
+        items = ocr.recognize_order(image_bytes)
+        if not items:
+            await message.answer("❌ Не удалось распознать текст на фото")
+            return
+
+        await process_items(message, items)
+    except Exception as e:
+        logger.error(f"OCR Doc Error: {e}")
+        await message.answer(f"Ошибка: {e}")
 
 
 @router.message(F.text)

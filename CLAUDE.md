@@ -16,7 +16,7 @@
 - **Frontend:** Streamlit
 - **База данных:** Supabase (PostgreSQL)
 - **ML:** sentence-transformers, FAISS (semantic search)
-- **Библиотеки:** fuzzywuzzy, pandas, openpyxl, pydantic-settings
+- **Библиотеки:** fuzzywuzzy, openpyxl, pydantic-settings
 
 ## 🗄️ Database (Supabase)
 

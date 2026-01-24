@@ -3,6 +3,7 @@ LLM-based matching через OpenRouter API.
 Заменяет локальный embedding matcher (экономит ~500 МБ RAM).
 Промпт загружается из Supabase (таблица settings).
 """
+
 import json
 import logging
 import re
@@ -90,12 +91,20 @@ def _get_system_prompt() -> str:
     # except ...
 
 
-
 class LLMMatcher:
     """Matching товаров через LLM API (OpenRouter)"""
 
-    def __init__(self, api_key: str, model: str = "mistralai/mistral-small-3.1-24b-instruct"):
+    def __init__(
+        self, api_key: str, model: str = "meta-llama/llama-3.3-70b-instruct:free"
+    ):
         self.api_key = api_key
+        # Log masked key for debugging
+        if api_key:
+            masked = f"{api_key[:6]}...{api_key[-4:]}" if len(api_key) > 10 else "***"
+            logger.info(f"LLMMatcher init with key: {masked}")
+        else:
+            logger.warning("LLMMatcher init with EMPTY key")
+
         self.model = model
         self.products_cache: str | None = None
         self._products_list: list[dict] = []
@@ -109,8 +118,8 @@ class LLMMatcher:
         # Формируем компактный список для промпта (лимит увеличен до 3000, т.к. каталог ~840 товаров)
         lines = []
         for p in products[:3000]:
-            sku = p.get('sku', '')
-            name = p.get('name', '')
+            sku = p.get("sku", "")
+            name = p.get("name", "")
             if sku and name:
                 lines.append(f"{sku} - {name}")
         self.products_cache = "\n".join(lines)
@@ -140,28 +149,32 @@ class LLMMatcher:
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/Antigravity",
+                    "X-Title": "Antigravity PriceOrders",
                 },
                 json={
                     "model": self.model,
                     "messages": [
                         {
                             "role": "system",
-                            "content": f"{_get_system_prompt()}\n\nКаталог товаров:\n{self.products_cache}"
+                            "content": f"{_get_system_prompt()}\n\nКаталог товаров:\n{self.products_cache}",
                         },
                         {
                             "role": "user",
-                            "content": f"Найди товар: {query}\n\nВерни ТОЛЬКО JSON без пояснений."
-                        }
+                            "content": f"Найди товар: {query}\n\nВерни ТОЛЬКО JSON без пояснений.",
+                        },
                     ],
                     "temperature": 0,
                     "max_tokens": 200,
                     "response_format": {"type": "json_object"},
                 },
-                timeout=30.0
+                timeout=30.0,
             )
 
             if response.status_code != 200:
-                logger.error(f"LLM API error: {response.status_code} - {response.text[:200]}")
+                logger.error(
+                    f"LLM API error: {response.status_code} - {response.text[:200]}"
+                )
                 return None
 
             data = response.json()
@@ -180,7 +193,7 @@ class LLMMatcher:
 
             # Извлекаем только JSON объект (игнорируем текст после него)
             # Kimi K2 иногда добавляет пояснения после JSON
-            json_match = re.search(r'\{[^{}]*\}', content)
+            json_match = re.search(r"\{[^{}]*\}", content)
             if json_match:
                 content = json_match.group(0)
 
@@ -192,9 +205,9 @@ class LLMMatcher:
                 return None
 
             # Нормализация полей (могут быть None или отсутствовать)
-            sku = result.get('sku')
-            name = result.get('name')
-            confidence = result.get('confidence', 0)
+            sku = result.get("sku")
+            name = result.get("name")
+            confidence = result.get("confidence", 0)
 
             # Проверяем что confidence - число
             try:
@@ -206,17 +219,21 @@ class LLMMatcher:
             confidence = max(0, min(100, confidence))
 
             validated_result = {
-                'sku': sku if sku else None,
-                'name': name if name else None,
-                'confidence': confidence
+                "sku": sku if sku else None,
+                "name": name if name else None,
+                "confidence": confidence,
             }
 
-            logger.info(f"LLM match: '{query}' → {validated_result.get('sku')} ({validated_result.get('confidence')}%)")
+            logger.info(
+                f"LLM match: '{query}' → {validated_result.get('sku')} ({validated_result.get('confidence')}%)"
+            )
             return validated_result
 
         except json.JSONDecodeError as e:
-            logger.error(f"LLM JSON parse error: {e}, content: {content[:100] if content else 'empty'}")
-            return {'sku': None, 'name': None, 'confidence': 0}
+            logger.error(
+                f"LLM JSON parse error: {e}, content: {content[:100] if content else 'empty'}"
+            )
+            return {"sku": None, "name": None, "confidence": 0}
         except httpx.TimeoutException:
             logger.error("LLM API timeout (30s)")
             return None
@@ -227,7 +244,7 @@ class LLMMatcher:
     def get_product_by_sku(self, sku: str) -> dict | None:
         """Найти товар в кэше по SKU"""
         for p in self._products_list:
-            if p.get('sku') == sku:
+            if p.get("sku") == sku:
                 return p
         return None
 
@@ -246,13 +263,12 @@ def get_llm_matcher() -> LLMMatcher | None:
     global _llm_matcher
     if _llm_matcher is None:
         from backend.config import settings
+
         if settings.openrouter_api_key:
             _llm_matcher = LLMMatcher(
-                api_key=settings.openrouter_api_key,
-                model=settings.llm_model
+                api_key=settings.openrouter_api_key, model=settings.llm_model
             )
             logger.info(f"✅ LLMMatcher инициализирован (модель: {settings.llm_model})")
         else:
             logger.warning("⚠️ OPENROUTER_API_KEY не установлен - LLM matching отключен")
     return _llm_matcher
-
