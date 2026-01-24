@@ -6,18 +6,11 @@ LLM-based matching через Google Gemini (via Cloudflare Relay).
 
 import json
 import logging
-import re
 import time
-import httpx
-
-from backend.config import settings
+import asyncio
+from backend.services.llm_router import llm_router
 
 logger = logging.getLogger(__name__)
-
-# Cloudflare Worker relay (proxies to Google Gemini with embedded API key)
-GEMINI_RELAY_URL = "https://gemini-api-relay.schmidvili1.workers.dev"
-# Model for generation (Flash 2.0 is fast and free)
-GENERATION_MODEL = "models/gemini-2.0-flash-001"
 
 # Fallback промпт (если БД недоступна)
 DEFAULT_SYSTEM_PROMPT = """Ты помощник по сопоставлению товаров Jakko (канализация, ППР, водопровод).
@@ -82,7 +75,8 @@ class LLMMatcher:
     def __init__(self):
         self.products_cache: str | None = None
         self._products_list: list[dict] = []
-        logger.info("✅ LLMMatcher configured (via Cloudflare Relay)")
+        self.router = llm_router
+        logger.info("✅ LLMMatcher configured (via Cloud Router: Gemini/Groq)")
 
     def set_products(self, products: list[dict]) -> None:
         """
@@ -110,77 +104,75 @@ class LLMMatcher:
         if not query or len(query.strip()) < 2:
             return None
 
-        # Формируем запрос к Google API
-        url = f"{GEMINI_RELAY_URL}/v1beta/{GENERATION_MODEL}:generateContent"
-
-        full_prompt = (
-            f"{DEFAULT_SYSTEM_PROMPT}\n\n"
+        # Формируем полный промпт
+        # Note: router expects plain text prompt and optional system prompt
+        # We put the catalog in the USER prompt to ensure it's seen as context
+        full_user_prompt = (
             f"КАТАЛОГ ТОВАРОВ:\n{self.products_cache}\n\n"
             f"ЗАПРОС КЛИЕНТА: {query}\n"
             f"Найди лучший товар из каталога."
         )
 
-        payload = {
-            "contents": [{"parts": [{"text": full_prompt}]}],
-            "generationConfig": {
-                "temperature": 0.0,
-                "responseMimeType": "application/json",
-            },
-        }
-
         try:
             start_time = time.time()
 
-            # Simple retry for 429
-            max_retries = 3
-            backoff = 2
-
-            for attempt in range(max_retries):
-                try:
-                    response = httpx.post(
-                        url,
-                        json=payload,
-                        headers={"Content-Type": "application/json"},
-                        timeout=30.0,
+            # BRIDGE: Call async router from sync method
+            # Since this is likely running in a thread pool (FastAPI sync route), asyncio.run works.
+            # If running in a loop, we might need a different approach, but simplistic for now.
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If we are already in a loop, we can't use run_until_complete easily without nesting issues.
+                    # However, MatchingService is usually sync.
+                    text_content = asyncio.run_coroutine_threadsafe(
+                        self.router.completion(
+                            full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
+                        ),
+                        loop,
+                    ).result()
+                else:
+                    text_content = asyncio.run(
+                        self.router.completion(
+                            full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
+                        )
                     )
-
-                    if response.status_code == 429:
-                        if attempt < max_retries - 1:
-                            time.sleep(backoff)
-                            backoff *= 2
-                            continue
-
-                    break  # Success or other error
-                except httpx.TimeoutException:
-                    if attempt < max_retries - 1:
-                        continue
-                    raise
+            except RuntimeError:
+                # No loop running
+                text_content = asyncio.run(
+                    self.router.completion(
+                        full_user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT
+                    )
+                )
 
             duration = time.time() - start_time
 
-            if response.status_code != 200:
-                logger.error(
-                    f"LLM API error: {response.status_code} - {response.text[:200]}"
-                )
+            if not text_content:
+                logger.warning("LLM Router returned no content")
                 return None
 
-            data = response.json()
-            # Google API response structure: candidates[0].content.parts[0].text
-            try:
-                text_content = data["candidates"][0]["content"]["parts"][0]["text"]
-            except (KeyError, IndexError, TypeError):
-                logger.error(f"LLM unexpected response format: {data}")
-                return None
+            # Helper to clean JSON
+            def clean_json(text):
+                text = text.replace("```json", "").replace("```", "").strip()
+                # Attempt to find JSON structure if there is extra text
+                start = text.find("{")
+                end = text.rfind("}")
+                if start != -1 and end != -1:
+                    return text[start : end + 1]
+                return text
 
             # Parse JSON
             try:
                 result = json.loads(text_content)
             except json.JSONDecodeError:
-                # Cleanup markdown code blocks if standard parsing fails (though responseMimeType should prevent this)
-                clean_text = (
-                    text_content.replace("```json", "").replace("```", "").strip()
-                )
-                result = json.loads(clean_text)
+                # Cleanup markdown
+                clean_text = clean_json(text_content)
+                try:
+                    result = json.loads(clean_text)
+                except json.JSONDecodeError:
+                    logger.error(
+                        f"LLM JSON Parse Error. Content: {text_content[:100]}..."
+                    )
+                    return None
 
             # Валидация
             sku = result.get("sku")

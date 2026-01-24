@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
     llm_model: str = os.getenv("LLM_MODEL", "google/gemini-2.0-flash-001")
 
+    # Groq API (Free Tier Backup)
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
     # OCR для рукописных заказов (Vision LLM)
     ocr_model: str = os.getenv("OCR_MODEL", "qwen/qwen3-vl-32b-instruct")
     fuzzy_threshold: int = (
