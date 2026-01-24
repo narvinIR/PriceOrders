@@ -1,6 +1,16 @@
 import pandas as pd
+import sys
+import os
 
-file_path = "/home/dimas/projects/PriceOrders/jakko_order_20260124_081218.xlsx"
+if len(sys.argv) > 1:
+    file_path = sys.argv[1]
+else:
+    file_path = "/home/dimas/projects/PriceOrders/jakko_order_20260124_081218.xlsx"
+
+if not os.path.exists(file_path):
+    print(f"Error: File {file_path} not found.")
+    sys.exit(1)
+
 df = pd.read_excel(file_path)
 
 # Normalize column access
