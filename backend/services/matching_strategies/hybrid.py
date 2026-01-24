@@ -60,20 +60,34 @@ class HybridStrategy(MatchingStrategy):
         embedding_matcher = get_embedding_matcher()
         candidate_products = products  # Default: use all products
 
+        # Map product ID to its semantic score for lookup
+        semantic_scores = {}
+
         try:
             # Get top candidates from semantic search
             semantic_results = embedding_matcher.search(
                 client_name, top_k=50, min_score=0.4
             )
             if semantic_results:
-                # Extract IDs of semantically similar products
-                candidate_ids = {str(m[0]["id"]) for m in semantic_results}
+                # Extract IDs and scores
+                for prod, score in semantic_results:
+                    semantic_scores[str(prod["id"]).lower()] = score
+
+                candidate_ids = set(semantic_scores.keys())
+
                 # Filter products to only those found by semantic search
-                filtered = [p for p in products if str(p["id"]) in candidate_ids]
+                filtered = [
+                    p for p in products if str(p.get("id", "")).lower() in candidate_ids
+                ]
+
                 if filtered:
                     candidate_products = filtered
                     logger.debug(
                         f"Semantic pre-filter: {len(products)} -> {len(candidate_products)} candidates"
+                    )
+                else:
+                    logger.warning(
+                        f"Semantic found {len(candidate_ids)} items but no ID validation match in loaded products."
                     )
         except Exception as e:
             # Fallback to full scan if embedding search fails
@@ -82,11 +96,17 @@ class HybridStrategy(MatchingStrategy):
         # We perform scan with fuzzy matching + filters on pre-filtered candidates
         matches = []
         for product in candidate_products:
+            # Retrieve semantic score if available
+            sem_score = semantic_scores.get(str(product.get("id", "")).lower(), 0.0)
+
             # --- START FILTERING ---
             # 1. Pipe Size
             if client_size:
                 product_size = extract_pipe_size(product["name"])
                 if product_size and product_size != client_size:
+                    logger.debug(
+                        f"Filter size mismatch: {client_size} vs {product_size} for {product['name']}"
+                    )
                     continue
 
             # 2. Thread Size
@@ -96,6 +116,9 @@ class HybridStrategy(MatchingStrategy):
                 if not product_thread:
                     continue
                 if product_thread != client_thread_size:
+                    logger.debug(
+                        f"Filter thread mismatch: {client_thread_size} vs {product_thread} for {product['name']}"
+                    )
                     continue
 
             # 3. Fitting Size
@@ -107,8 +130,12 @@ class HybridStrategy(MatchingStrategy):
 
                     if len(norm_client) == 1:
                         if norm_product[0] != norm_client[0]:
+                            logger.debug(
+                                f"Filter fitting mismatch for {product['name']}"
+                            )
                             continue
                     elif norm_product != norm_client:
+                        logger.debug(f"Filter fitting mismatch for {product['name']}")
                         continue
 
             # 4. Color (Strict if specified)
@@ -139,13 +166,27 @@ class HybridStrategy(MatchingStrategy):
 
             # Fuzzy scoring
             prod_norm_name = normalize_name(product["name"])
-            ratio = (
+            fuzzy_score = (
                 fuzz.token_sort_ratio(norm_name, prod_norm_name)
                 + fuzz.token_set_ratio(norm_name, prod_norm_name)
             ) / 2
 
-            if ratio >= settings.fuzzy_threshold:
-                matches.append((product, ratio))
+            # Hybrid Score Calculation
+            # If semantic score is VERY high (>0.85), trust it more even if fuzzy is lower (e.g. noise like 'Tebo/UNIO')
+            # 0.85 semantic ~= 85 fuzzy
+
+            final_score = fuzzy_score
+            match_source = "fuzzy"
+
+            if sem_score > 0.85:
+                # Upboost fuzzy score if semantic is strong and fuzzy is at least decent (>40)
+                # This allows bypassing strict 70 threshold for "meaning" matches
+                if fuzzy_score > 40:
+                    final_score = max(fuzzy_score, sem_score * 100)
+                    match_source = "semantic_boost"
+
+            if final_score >= settings.fuzzy_threshold:
+                matches.append((product, final_score, match_source))
 
         if not matches:
             return None
@@ -184,7 +225,12 @@ class HybridStrategy(MatchingStrategy):
 
         # Find best match
         best_match = max(matches, key=lambda x: x[1])
-        product, score = best_match
+        # Handle 2 or 3 element tuples (backward compat logic just in case)
+        if len(best_match) == 3:
+            product, score, match_type_suffix = best_match
+        else:
+            product, score = best_match
+            match_type_suffix = "fuzzy"
 
         return MatchResult(
             product_id=UUID(product["id"]),

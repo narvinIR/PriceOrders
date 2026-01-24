@@ -178,6 +178,17 @@ class MatchingService:
         """
         logger.debug(f"Matching: sku={client_sku!r}, name={client_name!r}")
 
+        # HEURISTIC: If name is empty but SKU looks like a description (has spaces, long), use SKU as name
+        if (
+            not client_name
+            and client_sku
+            and len(client_sku) > 10
+            and " " in client_sku
+        ):
+            client_name = client_sku
+            # Keep client_sku as is, but now Strategy has a name to work with
+            logger.info(f"Swap: using SKU as name for matching: {client_name}")
+
         products = self._load_products()
         mappings = self._load_client_mappings(client_id)
 
