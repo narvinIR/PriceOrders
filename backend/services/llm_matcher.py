@@ -93,22 +93,37 @@ class LLMMatcher:
         self.products_cache = "\n".join(lines)
         logger.info(f"✅ LLMMatcher: загружено {len(lines)} товаров")
 
-    def match(self, query: str) -> dict | None:
+    def match(self, query: str, candidates: list[dict] = None) -> dict | None:
         """
         Найти товар через LLM.
+        :param query: Запрос пользователя
+        :param candidates: Опциональный список кандидатов (RAG) для промпта
         """
-        if not self.products_cache:
-            logger.warning("LLMMatcher: каталог не загружен")
+        if not candidates and not self.products_cache:
+            logger.warning("LLMMatcher: каталог не загружен и кандидаты не переданы")
             return None
 
         if not query or len(query.strip()) < 2:
             return None
 
+        # Prepare Context
+        context_str = ""
+        if candidates:
+            # Use provided RAG candidates
+            lines = []
+            for p in candidates:
+                sku = p.get("sku", "")
+                name = p.get("name", "")
+                if sku and name:
+                    lines.append(f"{sku} - {name}")
+            context_str = "\n".join(lines)
+        else:
+            # Fallback to full cache (legacy)
+            context_str = self.products_cache
+
         # Формируем полный промпт
-        # Note: router expects plain text prompt and optional system prompt
-        # We put the catalog in the USER prompt to ensure it's seen as context
         full_user_prompt = (
-            f"КАТАЛОГ ТОВАРОВ:\n{self.products_cache}\n\n"
+            f"КАТАЛОГ ТОВАРОВ:\n{context_str}\n\n"
             f"ЗАПРОС КЛИЕНТА: {query}\n"
             f"Найди лучший товар из каталога."
         )

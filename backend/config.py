@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Groq API (Free Tier Backup)
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
-    groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    groq_model: str = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
     # OCR для рукописных заказов (Vision LLM)
     ocr_model: str = os.getenv("OCR_MODEL", "qwen/qwen3-vl-32b-instruct")

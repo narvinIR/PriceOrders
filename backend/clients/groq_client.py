@@ -42,21 +42,41 @@ class GroqClient:
             "max_tokens": 1024,
         }
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.BASE_URL, headers=headers, json=payload, timeout=10
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data["choices"][0]["message"]["content"]
-                    elif response.status == 429:
-                        logger.warning("Groq Rate Limit Exceeded (429)")
-                        raise Exception("Groq Rate Limit")
-                    else:
-                        text = await response.text()
-                        logger.error(f"Groq API Error {response.status}: {text}")
-                        return None
-        except Exception as e:
-            logger.error(f"Groq Request Failed: {e}")
-            return None
+        max_retries = 3
+        backoff = 2.0
+
+        for attempt in range(max_retries + 1):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self.BASE_URL, headers=headers, json=payload, timeout=20
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return data["choices"][0]["message"]["content"]
+                        elif response.status == 429:
+                            if attempt < max_retries:
+                                logger.warning(
+                                    f"Groq Rate Limit (429). Sleeping {backoff}s..."
+                                )
+                                import asyncio
+
+                                await asyncio.sleep(backoff)
+                                backoff *= 2
+                                continue
+                            else:
+                                logger.error("Groq Rate Limit Exceeded (Max Retries).")
+                                return None
+                        else:
+                            text = await response.text()
+                            logger.error(f"Groq API Error {response.status}: {text}")
+                            return None
+            except Exception as e:
+                logger.error(f"Groq Request Failed: {e}")
+                if attempt < max_retries:
+                    import asyncio
+
+                    await asyncio.sleep(1)
+                    continue
+                return None
+        return None
